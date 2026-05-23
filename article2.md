@@ -1,18 +1,12 @@
 # How to Design a RAG Pipeline for 10 Million Documents with Zero Hallucination
 
-**Retrieval-Augmented Generation (RAG) at scale is one of the hardest unsolved engineering problems in production AI.** Not because the concepts are complex — but because most engineers have never had to think past a 10,000-document prototype.
+**Retrieval-Augmented Generation (RAG) at scale is one of the most demanding engineering challenges in production AI today.** The gap between a working prototype and a system that reliably handles millions of documents without hallucinating is not a small one — it spans architecture, infrastructure, evaluation, and operational discipline.
 
-Here is the question that exposes that gap instantly:
+When teams set out to build RAG systems for enterprise search, internal knowledge bases, legal document analysis, healthcare records, or large-scale customer support platforms, they quickly discover that the naive approach — "grab some embeddings, do a similarity search, pass chunks to an LLM" — breaks down fast. It works at 1,000 documents. It does not work at 1 million. And it is entirely unsuitable at 10 million.
 
-*"Design a RAG pipeline that handles 10 million documents and produces zero hallucinations in production."*
+The reasons are not mysterious. They are specific, predictable engineering problems: retrieval latency, index maintenance cost, precision degradation at scale, hallucinations that compound through the generation step, lack of verifiability, and no way to know when the system is silently failing.
 
-Walk into any senior ML engineering interview, any system design round at a company actually shipping AI products, and this question — or a close variant of it — will surface. It is the benchmark that separates engineers who have read about RAG from engineers who have built it under real constraints.
-
-The wrong answer, and the most common one: *"I'd use GPT-4 with some vector embeddings and a similarity search."*
-
-That answer fails not because it's wrong in theory — it fails because it completely ignores the engineering realities of operating at scale: latency, retrieval precision, index maintenance, hallucination detection, observability, and cost. A system designed for 10,000 documents will collapse under 10 million. The architecture has to be rethought from the ground up.
-
-The right answer is a **10-step engineering discipline** — each step a deliberate design decision, each one a failure mode if skipped. Here is a full breakdown of every step, with the reasoning, the math, and the production tradeoffs.
+Building a RAG pipeline for 10 million documents that produces trustworthy, citation-backed, hallucination-resistant responses requires treating each layer of the stack as a first-class engineering concern. There are **10 critical areas** to get right — each one a deliberate design decision, each one a failure mode if skipped or underestimated. This article walks through all of them: the reasoning, the math, and the production tradeoffs.
 
 ---
 
