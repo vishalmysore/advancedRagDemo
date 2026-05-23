@@ -18,7 +18,7 @@ At 10 million documents, everything breaks:
 
 - Brute-force vector search takes **minutes**, not milliseconds
 - A single frontier model call cannot see even 0.001% of your corpus
-- A bad retrieval step poisons everything downstream — the best model in the world cannot unfailucinate a wrong chunk
+- A bad retrieval step poisons everything downstream — the best model in the world cannot correct a response built on a wrong chunk
 - Hallucinations compound: one wrong fact leads the model to generate plausible-sounding extensions of that fact
 
 This is why **retrieval quality matters more than the frontier model itself** at scale. A perfectly retrieved set of 5 chunks with GPT-3.5 will outperform a hallucinating GPT-4 response built on bad retrieval every single time.
