@@ -3,7 +3,7 @@ import { db } from './db.js'
 import { getEmbedding, cosineSimilarity, getCrossEncoderScore } from './embeddings.js'
 import { indexChunkInTransaction, tokenize, searchBM25 } from './bm25.js'
 import { evaluateAnswerFaithfulness, evaluateContextRelevance, evaluateAnswerRelevance } from './eval.js'
-import { callLLM } from './llm.js'
+import { callLLM, setLLMConfig } from './llm.js'
 
 /**
  * MD5-like string hashing helper to create unique cache keys.
@@ -247,6 +247,9 @@ export async function executeRAGQuery(query, config, traceCallback) {
     apiKey = '',
     proxyUrl = ''
   } = config
+
+  // Synchronise global LLM settings right before calling provider APIs
+  setLLMConfig({ provider: llmProvider, model: llmModel, apiKey, proxyUrl })
 
   const trace = {
     timings: {},

@@ -191,7 +191,8 @@ function loadLLMConfigFromStorage() {
       providerSelect.value = parsed.provider || 'mock'
       updateModelsDropdown()
       modelSelect.value = parsed.model || 'mock-rag-agent'
-      apiKeyInput.value = parsed.apiKey || ''
+      // apiKey is NOT restored from storage (session only — matches harnessEngineeringDemo)
+      apiKeyInput.value = ''
       proxyInput.value = parsed.proxyUrl || getLLMConfig().proxyUrl
     } catch (e) {
       console.error('Error parsing stored LLM config', e)
@@ -203,10 +204,11 @@ function loadLLMConfigFromStorage() {
 }
 
 function saveLLMConfigToStorage() {
+  // Do NOT save apiKey to localStorage (security — session only, matches harnessEngineeringDemo pattern).
+  // Only persist non-sensitive preferences: provider, model, proxyUrl.
   const cfg = {
     provider: providerSelect.value,
     model: modelSelect.value,
-    apiKey: apiKeyInput.value,
     proxyUrl: proxyInput.value
   }
   localStorage.setItem('rag_llm_config', JSON.stringify(cfg))
@@ -345,6 +347,16 @@ async function refreshDocumentList() {
 function bindEventHandlers() {
   // Test connection button
   testConnectionBtn.addEventListener('click', async () => {
+    // Always sync config from UI first (matches harnessEngineeringDemo pattern)
+    applyConfigChange()
+    const cfg = getLLMConfig()
+    if (cfg.provider !== 'mock' && !cfg.apiKey) {
+      testResult.classList.remove('hidden')
+      testResult.className = 'test-result test-result-fail'
+      testResult.textContent = 'Connection failed: No API key entered. Please enter your API key above.'
+      return
+    }
+
     testConnectionBtn.disabled = true
     testResult.classList.remove('hidden')
     testResult.className = 'test-result test-result-ok'
@@ -418,6 +430,14 @@ async function handleQuerySubmission() {
   const query = queryInput.value.trim()
   if (!query) return
   if (isExecutingQuery) return
+
+  // Always sync config from UI before executing (matches harnessEngineeringDemo pattern)
+  applyConfigChange()
+  const cfg = getLLMConfig()
+  if (cfg.provider !== 'mock' && !cfg.apiKey) {
+    alert('Please enter your API key in the configuration bar, or switch to Mock AI to test without one.')
+    return
+  }
 
   // Verify we have documents indexed
   const stats = await getDocumentStats()
