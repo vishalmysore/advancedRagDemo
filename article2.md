@@ -1,7 +1,5 @@
 # Design a RAG Pipeline for 10 Million Docs with Zero Hallucination
 
-> "Yeh classic distributed systems questions se zyada interesting hai. Aur 99% Indian engineers iska proper answer nahi de sakte."
-
 Every senior engineering interview at FAANG, every system design round at a product unicorn — someone eventually asks: *"How would you build a production RAG system that doesn't hallucinate?"*
 
 Most engineers answer with: "Use GPT-4 and add some embeddings." That answer gets you rejected.
