@@ -1,10 +1,18 @@
-# Design a RAG Pipeline for 10 Million Docs with Zero Hallucination
+# How to Design a RAG Pipeline for 10 Million Documents with Zero Hallucination
 
-Every senior engineering interview at FAANG, every system design round at a product unicorn — someone eventually asks: *"How would you build a production RAG system that doesn't hallucinate?"*
+**Retrieval-Augmented Generation (RAG) at scale is one of the hardest unsolved engineering problems in production AI.** Not because the concepts are complex — but because most engineers have never had to think past a 10,000-document prototype.
 
-Most engineers answer with: "Use GPT-4 and add some embeddings." That answer gets you rejected.
+Here is the question that exposes that gap instantly:
 
-The real answer is a 10-step engineering discipline. Let's go through each one.
+*"Design a RAG pipeline that handles 10 million documents and produces zero hallucinations in production."*
+
+Walk into any senior ML engineering interview, any system design round at a company actually shipping AI products, and this question — or a close variant of it — will surface. It is the benchmark that separates engineers who have read about RAG from engineers who have built it under real constraints.
+
+The wrong answer, and the most common one: *"I'd use GPT-4 with some vector embeddings and a similarity search."*
+
+That answer fails not because it's wrong in theory — it fails because it completely ignores the engineering realities of operating at scale: latency, retrieval precision, index maintenance, hallucination detection, observability, and cost. A system designed for 10,000 documents will collapse under 10 million. The architecture has to be rethought from the ground up.
+
+The right answer is a **10-step engineering discipline** — each step a deliberate design decision, each one a failure mode if skipped. Here is a full breakdown of every step, with the reasoning, the math, and the production tradeoffs.
 
 ---
 
