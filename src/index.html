@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Advanced Browser-Native RAG Demo</title>
+  <!-- Google Fonts: Inter and Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="./styles.css" />
+  <!-- PDF.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+</head>
+<body>
+  
+  <!-- ── Configuration Header ───────────────────────────────────── -->
+  <header class="config-banner">
+    <div class="banner-left">
+      <div class="app-logo">
+        <span class="logo-icon">📡</span>
+        <div>
+          <div class="app-title">Advanced Local RAG</div>
+          <div class="app-sub">100% In-Browser Vector &amp; BM25 Retrieval Engine</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="banner-center">
+      <div class="config-row">
+        <div class="config-field">
+          <label>LLM Provider</label>
+          <select id="providerSelect"></select>
+        </div>
+        <div class="config-field">
+          <label>Model Name</label>
+          <select id="modelSelect"></select>
+        </div>
+        <div class="config-field api-field">
+          <label>API Key <span class="key-note">(session only)</span></label>
+          <input id="apiKeyInput" type="password" placeholder="sk-…" autocomplete="off" />
+        </div>
+        <div class="config-field proxy-field">
+          <label>CORS Proxy <button id="resetProxyBtn" class="btn-inline" title="Reset proxy">↺</button></label>
+          <input id="proxyInput" type="text" placeholder="https://..." />
+        </div>
+        <div class="config-field test-field">
+          <label>&nbsp;</label>
+          <button id="testConnectionBtn" class="btn btn-test">🧪 Test API</button>
+        </div>
+      </div>
+      <div id="testResult" class="test-result hidden"></div>
+    </div>
+
+    <div class="banner-right">
+      <div id="dbStatsBadge" class="memory-badge">0 documents cached</div>
+      <button id="clearDbBtn" class="btn btn-reset">🗑 Clear All Data</button>
+    </div>
+  </header>
+
+  <!-- ── Main Dashboard ─────────────────────────────────────────── -->
+  <main class="dashboard">
+
+    <!-- ── Left Column: Document Desk & Parameters ────────────────── -->
+    <aside class="col col-left">
+      <!-- File Ingestion Section -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-icon">📁</span>
+          <span>Document Ingest Desk</span>
+        </div>
+        <div class="panel-body">
+          <div id="dropZone" class="upload-zone">
+            <span class="upload-icon">📤</span>
+            <p>Drag &amp; drop PDF or TXT here</p>
+            <p class="upload-sub">or click to browse local files</p>
+            <input type="file" id="fileInput" accept=".pdf,.txt" style="display: none;" />
+          </div>
+          
+          <div class="doc-list-container">
+            <label class="field-label" style="margin-top: 14px;">Ingested Corpus</label>
+            <div id="docTableContainer" class="doc-table-wrapper">
+              <table id="docTable" class="doc-table">
+                <thead>
+                  <tr>
+                    <th>File Name</th>
+                    <th>Chunks</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="docTableBody">
+                  <tr class="empty-row"><td colspan="3">No documents ingested.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tuning parameters -->
+      <div class="panel panel-params">
+        <div class="panel-header">
+          <span class="panel-icon">⚙</span>
+          <span>RAG System Tuning</span>
+        </div>
+        <div class="panel-body">
+          <!-- Chunk Size slider -->
+          <div class="param-group">
+            <div class="slider-header">
+              <label class="field-label">Chunk Size</label>
+              <span id="valChunkSize" class="param-val">500</span>
+            </div>
+            <input type="range" id="sliderChunkSize" min="200" max="1500" step="50" value="500" />
+            <p class="param-desc">Target characters per chunk.</p>
+          </div>
+
+          <!-- Chunk Overlap slider -->
+          <div class="param-group">
+            <div class="slider-header">
+              <label class="field-label">Chunk Overlap</label>
+              <span id="valChunkOverlap" class="param-val">50</span>
+            </div>
+            <input type="range" id="sliderChunkOverlap" min="0" max="400" step="10" value="50" />
+            <p class="param-desc">Overlap size between contiguous chunks.</p>
+          </div>
+
+          <!-- Weights slider -->
+          <div class="param-group">
+            <div class="slider-header">
+              <label class="field-label">Weights (Vector vs Keyword)</label>
+              <span id="valWeights" class="param-val">50% / 50%</span>
+            </div>
+            <input type="range" id="sliderWeights" min="0" max="100" step="5" value="50" />
+            <p class="param-desc">Left: Cosine Similarity (Vector) · Right: BM25 (Keyword)</p>
+          </div>
+
+          <!-- Reranker -->
+          <div class="param-group">
+            <label class="field-label">Stage 2 Reranking</label>
+            <select id="rerankSelect" class="scenario-select">
+              <option value="none">None (Use Hybrid score)</option>
+              <option value="proximity" selected>Syntactic (Query Proximity window)</option>
+              <option value="neural">Neural (Cross-Encoder miniLM - 90MB)</option>
+            </select>
+            <p class="param-desc">Reranks top 15 candidate retrievals.</p>
+          </div>
+
+          <!-- Top-K slider -->
+          <div class="param-group">
+            <div class="slider-header">
+              <label class="field-label">Retrieve Top-K</label>
+              <span id="valTopK" class="param-val">4</span>
+            </div>
+            <input type="range" id="sliderTopK" min="1" max="10" step="1" value="4" />
+            <p class="param-desc">Number of chunks injected as context.</p>
+          </div>
+
+          <!-- Cache Toggle -->
+          <div class="param-group row-group">
+            <label class="field-label" style="margin-bottom:0;">Use Retrieval Cache</label>
+            <input type="checkbox" id="checkUseCache" checked />
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Center Column: Search Playground & Observability ──────── -->
+    <section class="col col-center">
+      <!-- Query Interface -->
+      <div class="query-section">
+        <div class="query-box-container">
+          <textarea id="queryInput" placeholder="Ask a question about your ingested documents..."></textarea>
+          <div class="query-actions">
+            <div class="benchmark-toggle-container">
+              <label class="switch">
+                <input type="checkbox" id="benchmarkToggle" />
+                <span class="slider-round"></span>
+              </label>
+              <span class="benchmark-toggle-label">Compare Retrieval Methods (Benchmark Mode)</span>
+            </div>
+            <button id="submitQueryBtn" class="btn btn-execute">▶ Ask RAG</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model Download Progress Banner -->
+      <div id="modelProgressBanner" class="model-progress-banner hidden">
+        <div class="progress-info">
+          <span class="progress-title" id="progressTitle">Downloading Local Embedding Model...</span>
+          <span id="progressPercent" class="progress-percent">0%</span>
+        </div>
+        <div class="progress-bar-wrapper">
+          <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+        <div id="progressFileName" class="progress-file-name">Initialising WebAssembly ONNX Runtime...</div>
+      </div>
+
+      <!-- Live Observability Trace Logs -->
+      <div class="panel panel-trace">
+        <div class="panel-header">
+          <span class="panel-icon">📡</span>
+          <span>RAG Pipeline Observability Trace</span>
+          <span class="trace-live-dot"></span>
+        </div>
+        <div id="traceContainer" class="trace-container">
+          <div class="trace-empty">
+            <div class="trace-empty-icon">⟳</div>
+            <p>Upload a document and ask a question to start the RAG execution.</p>
+            <p class="trace-empty-sub">Pipeline execution steps will stream here in real time, showing vector scores, keyword statistics, and evaluations.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Right Column: Response Desk or Benchmark Desk ─────────── -->
+    <section class="col col-right">
+      
+      <!-- Standard Mode Desk -->
+      <div id="standardResponseDesk" class="response-desk-container">
+        
+        <!-- Answer Panel -->
+        <div class="panel answer-panel">
+          <div class="panel-header">
+            <span class="panel-icon">👤</span>
+            <span>RAG Response Desk</span>
+          </div>
+          <div class="panel-body">
+            
+            <div id="waitingResponse" class="waiting-msg">
+              <div class="waiting-icon">⚑</div>
+              <p>Waiting for RAG execution...</p>
+              <p class="waiting-sub font-mono">Answers will appear here with dynamic, interactive citations.</p>
+            </div>
+            
+            <div id="responseContainer" class="response-content hidden">
+              <!-- Hallucination warning banner -->
+              <div id="hallucinationBanner" class="hallucination-alert hidden">
+                <span class="alert-icon">⚠️</span>
+                <div>
+                  <strong>Potential Hallucination Alert!</strong>
+                  <p class="alert-sub" id="hallucinationReason">The answer contains numbers or technical terms not found in the source documents.</p>
+                </div>
+              </div>
+
+              <!-- Answer text -->
+              <div class="rag-answer-wrapper">
+                <label class="field-label">Generated Answer</label>
+                <div id="ragAnswer" class="rag-answer"></div>
+              </div>
+
+              <!-- Continuous Evals Gauge cards -->
+              <label class="field-label" style="margin-top: 18px;">Local Retrieval Evaluation Metrics</label>
+              <div class="metrics-grid">
+                <div class="metric-card">
+                  <div class="metric-val" id="evalContextRelevance">0%</div>
+                  <div class="metric-lbl">Context Relevance</div>
+                </div>
+                <div class="metric-card">
+                  <div class="metric-val" id="evalFaithfulness">0%</div>
+                  <div class="metric-lbl">Faithfulness</div>
+                </div>
+                <div class="metric-card">
+                  <div class="metric-val" id="evalAnswerRelevance">0%</div>
+                  <div class="metric-lbl">Answer Relevance</div>
+                </div>
+                <div class="metric-card">
+                  <div class="metric-val" id="evalLatency">0ms</div>
+                  <div class="metric-lbl">Total Latency</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Retrieved Sources Panel -->
+        <div class="panel sources-panel">
+          <div class="panel-header">
+            <span class="panel-icon">📚</span>
+            <span>Retrieved Sources</span>
+          </div>
+          <div class="panel-body" id="sourcesContainer">
+            <div class="empty-sources">No sources retrieved yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Benchmark Mode Desk (Grid Column Split) -->
+      <div id="benchmarkResponseDesk" class="benchmark-desk-container hidden">
+        <div class="panel-header" style="grid-column: span 3; border-bottom: 1px solid var(--border);">
+          <span class="panel-icon">📊</span>
+          <span>Parallel Retrieval Comparison Desk (Side-by-Side)</span>
+        </div>
+        
+        <div class="benchmark-grid">
+          <!-- Vector-Only Column -->
+          <div class="bench-col bench-vector">
+            <div class="bench-header-sub font-mono">1. Vector Similarity Only</div>
+            <div class="bench-body-sub" id="benchVectorBody">
+              <div class="bench-waiting">Run query to compare...</div>
+            </div>
+          </div>
+
+          <!-- BM25-Only Column -->
+          <div class="bench-col bench-bm25">
+            <div class="bench-header-sub font-mono">2. BM25 Keyword Only</div>
+            <div class="bench-body-sub" id="benchBm25Body">
+              <div class="bench-waiting">Run query to compare...</div>
+            </div>
+          </div>
+
+          <!-- Hybrid Column -->
+          <div class="bench-col bench-hybrid">
+            <div class="bench-header-sub font-mono">3. Fused Hybrid (Target)</div>
+            <div class="bench-body-sub" id="benchHybridBody">
+              <div class="bench-waiting">Run query to compare...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Application Bundle scripts -->
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
