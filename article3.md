@@ -364,6 +364,31 @@ High context relevance + low answer relevance = the model is ignoring the contex
 
 **See it live:** After every query, the demo displays Context Relevance, Faithfulness, Answer Relevance, and Latency — computed locally in the browser. Adjust chunk size, retrieval weights, and reranking method, and watch how the metrics respond. This is the fastest feedback loop available for developing intuition about what actually moves RAG quality.
 
+### The Precision & Recall Tab — Live IR Metrics on Your Own Queries
+
+The demo includes a dedicated **Precision & Recall tab** in the right column that lets you compute real IR metrics — not proxies, but ground-truth measurements based on your own relevance judgments.
+
+After running any query, click **📈 Precision & Recall** in the tab bar. You will see every retrieved chunk displayed as a labeling card showing the chunk preview, source document, page number, Vector cosine score, BM25 score, and confidence percentage. Click **✓ Relevant** or **✗ Not Relevant** on each chunk. The moment you label a chunk, all seven metrics update live:
+
+| Metric | What it tells you |
+|---|---|
+| **P@1** | Is the single top-ranked chunk relevant? High P@1 means your reranker is working. |
+| **P@3** | Precision across the top 3 — the chunks the LLM attends to most strongly. |
+| **P@K** | Overall precision across all retrieved chunks. |
+| **R@K** | Recall — of all the chunks you marked relevant, what fraction were actually retrieved? |
+| **MRR** | Mean Reciprocal Rank — how high does the first relevant chunk appear? 1.0 = perfect. |
+| **NDCG@K** | Normalized Discounted Cumulative Gain — rewards relevant chunks appearing earlier in the ranking. |
+| **AP (AUC-PR)** | Average Precision — the area under the precision-recall curve. The single most informative summary of ranking quality. |
+
+As you label chunks, a **live SVG precision-recall curve** draws itself in real time — one plotted point per rank position where you marked a chunk as relevant. The curve shows the precision-recall tradeoff at every retrieval depth, with the AUC-PR score annotated on the chart.
+
+This is the only RAG demo that lets you measure retrieval quality on your own documents with your own relevance judgments, directly in the browser. Use it to answer the questions that matter in practice:
+
+- Does switching from Syntactic to Neural reranking improve your P@1 or MRR on this document set?
+- Does increasing Top-K improve Recall@K at the cost of Precision@K — and by how much?
+- Does your hybrid fusion consistently outperform the vector-only or BM25-only results in NDCG@K?
+- Is your AP score above 0.7? Below 0.5 means your ranking is barely better than random for this query.
+
 ---
 
 ## Stage 10: Caching, Memory, and Getting Smarter Over Time
@@ -420,6 +445,7 @@ The [Advanced Local RAG Demo](https://vishalmysore.github.io/advancedRagDemo/) i
 - **Faithfulness measurement:** Every query produces a live Faithfulness score. Run queries on documents where the answer is absent — watch faithfulness drop and the Hallucination Alert fire.
 - **Top-K precision tradeoff:** Adjust the Retrieve Top-K slider from 1 to 10 and observe how answer quality and faithfulness change as more (potentially noisier) chunks enter the prompt.
 - **Caching in action:** Run a query twice. The second run returns a `CACHE HIT` in the Observability Trace and completes in milliseconds. Toggle the cache off to see full pipeline latency.
+- **Precision & Recall tab:** After any query, switch to the 📈 Precision & Recall tab. Label each retrieved chunk as relevant or not relevant and watch P@1, P@3, P@K, R@K, MRR, NDCG@K, and Average Precision update live. The SVG precision-recall curve plots itself in real time as you label — one point per relevant chunk, with the AUC-PR score annotated. This is ground-truth IR evaluation on your own documents, computed entirely in the browser.
 
 Every slider, dropdown, and toggle in the demo is a direct implementation of one of the decisions described in this article. There is no faster way to build an intuition for RAG engineering than watching the metrics respond in real time to your choices.
 
