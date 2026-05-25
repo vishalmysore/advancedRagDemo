@@ -1,262 +1,428 @@
-# Top 10 Things to Take Care of When Building a RAG Pipeline
+# RAG Pipeline from Zero to Hero
 
-Building a Retrieval-Augmented Generation (RAG) pipeline looks straightforward on paper. You chunk your documents, embed them, store the vectors, retrieve the closest matches, and hand them to an LLM. Thirty lines of code and you have a working demo.
+Retrieval-Augmented Generation (RAG) is one of those ideas that is deceptively simple to understand and genuinely hard to master. The concept fits in a sentence: retrieve relevant documents, inject them into a prompt, generate a grounded answer. But the gap between understanding that sentence and building a pipeline that is fast, accurate, honest, and production-reliable is enormous.
 
-Then you take it to production and the real problems start.
+This article is the journey from zero to hero. It starts with the fundamentals and works up through the nuanced territory that most guides skip: information retrieval metrics, the precision-recall tradeoff, ranking quality, embedding failure modes, and the specific decisions that determine whether your RAG system is trustworthy or just impressive in demos.
 
-After building and observing a fully browser-native RAG pipeline — one that runs vector search, BM25 keyword retrieval, hybrid fusion, reranking, hallucination detection, and continuous evaluation entirely in the browser without a backend — here are the 10 things that will make or break your RAG system, and exactly what to do about each one.
-
----
-
-## 1. Chunking Strategy Is Not a Detail — It Is the Foundation
-
-Most teams treat chunking as an afterthought. Pick a chunk size, split on newlines, move on. This is the single most common reason RAG systems produce bad answers.
-
-**The problem with naive chunking:**
-- Fixed-size character splits tear sentences in half. A chunk that ends mid-sentence gives the LLM an incomplete thought and the model either ignores it or hallucinates a completion.
-- Chunks that are too large drown the relevant sentence in noise — the LLM's attention gets diluted across 800 words when only 40 of them answer the question.
-- Chunks that are too small lose all context — a chunk containing only "The decision was approved." tells you nothing without the surrounding paragraph.
-
-**What to do instead:**
-- Split on sentence boundaries, not character counts. Use a target chunk size (e.g. 500 characters) as a soft limit, but never break mid-sentence.
-- Add overlap between consecutive chunks — typically 10-15% of chunk size. This ensures that a fact sitting at the boundary of two chunks is fully represented in at least one of them.
-- Preserve metadata per chunk: source document, page number, section heading. This context is invaluable for citation and debugging.
-
-**See it live:** The [Advanced Local RAG Demo](https://vishalmysore.github.io/advancedRagDemo/) exposes **Chunk Size** and **Chunk Overlap** sliders directly in the UI. Upload a PDF, adjust the sliders, re-ingest, and watch the chunk count in the Ingested Corpus table change. Then run the same query at different chunk sizes and compare the retrieved sources — the difference in answer quality is immediate and visible.
+Every concept here is observable live in the [Advanced Local RAG Demo](https://vishalmysore.github.io/advancedRagDemo/) — a fully browser-native pipeline that runs vector search, BM25, hybrid fusion, reranking, hallucination detection, and continuous evaluation with no backend and no data leaving your device.
 
 ---
 
-## 2. Never Rely on Vector Search Alone
+## Zero: What RAG Actually Is and Why It Exists
 
-Vector embeddings capture semantic meaning. They are excellent at understanding that "myocardial infarction" and "heart attack" mean the same thing. They are poor at understanding that "Clause 4.2" and "Section 4.2" might refer to the same thing but "Article 4.2" in a different document does not.
+Language models are trained on static snapshots of data. Once training ends, their knowledge freezes. Ask GPT-4 about an internal policy document your company wrote last month, and it has nothing to work with — it will either say so or, worse, hallucinate a plausible-sounding answer.
 
-Keyword search (BM25) captures exact term matches. It is excellent at finding documents that contain the precise phrase the user typed. It is poor at understanding synonyms or paraphrased questions.
+RAG solves this by giving the model a retrieval step before generation. Instead of relying on parametric memory (knowledge baked into weights), the system retrieves relevant text from an external knowledge base and hands it to the model as context. The model then generates a response grounded in that retrieved text rather than in its training data.
 
-**The solution is always hybrid.** Run both in parallel, fuse the scores:
+```
+Without RAG:
+  User query → LLM (parametric memory) → Answer (may hallucinate)
 
+With RAG:
+  User query → Retrieval system → Relevant chunks → LLM + context → Grounded answer
+```
+
+This architecture does two things simultaneously: it keeps knowledge up to date without retraining, and it makes the model's answers verifiable — every claim can be traced back to a source document.
+
+That is the zero. Now let's build up.
+
+---
+
+## Stage 1: Ingestion — Turning Raw Documents into Searchable Chunks
+
+Before retrieval can happen, documents must be processed into a form the retrieval system can work with. This is called ingestion, and the quality of every downstream step depends on it.
+
+### Normalisation: the silent killer of retrieval quality
+
+Raw documents are messy. PDFs have extraction artifacts. HTML has tags and entities. Word documents embed formatting characters. Scanned documents have OCR errors. Before any indexing happens, text must be cleaned consistently:
+
+- **Unicode normalisation (NFC):** The character `é` can be encoded as a single codepoint (`U+00E9`) or as two codepoints (`e` + combining accent `U+0301`). These look identical but are not equal in a byte comparison. A BM25 index built without normalisation will silently miss matches.
+- **Whitespace standardisation:** Multiple spaces, tabs, non-breaking spaces, and zero-width joiners all collapse to a single standard space.
+- **Control character removal:** PDF extraction routinely produces characters outside the printable ASCII range. These corrupt embeddings and break tokenization.
+
+A chunk containing `"revenue growth"` (non-breaking space between words) will never BM25-match a query for `"revenue growth"`. You will spend days debugging retrieval quality before finding this.
+
+### Chunking: the most consequential decision you make
+
+Documents are too long to embed as a whole and too long to fit in a prompt. They must be split into chunks. The size and shape of those chunks determines retrieval precision more than almost any other factor.
+
+**Fixed-size character splitting** is the naive approach and the worst one. It splits on character count with no respect for sentence boundaries, leaving chunks that begin and end mid-thought. The model receives incomplete context and produces incomplete answers.
+
+**Sentence-aware sliding window chunking** is the correct approach:
+1. Split on sentence boundaries using punctuation patterns
+2. Accumulate sentences into a chunk until a soft size limit is reached
+3. When the limit is reached, save the chunk and backtrack by a configurable overlap — typically the last few sentences — before starting the next chunk
+
+The overlap is critical. Without it, a fact that sits at the boundary between two chunks will be split across both, fully present in neither. With overlap, it appears completely in at least one chunk.
+
+**The chunking tradeoff:**
+
+| Chunk size | Precision effect | Recall effect |
+|---|---|---|
+| Too small (< 100 chars) | High — tight focus on exact terms | Low — loses surrounding context, model gets incomplete information |
+| Too large (> 1500 chars) | Low — relevant sentence drowns in noise | High — captures more context, but dilutes the signal |
+| Optimal (400–700 chars) | Balanced | Balanced |
+
+This tradeoff is the first encounter with the precision-recall tension that runs through every layer of a RAG pipeline. We will return to it in depth.
+
+**See it live:** The demo exposes Chunk Size and Chunk Overlap sliders. Upload a document, adjust both, and re-ingest. Watch the chunk count change in the Ingested Corpus table. Then run the same query at different chunk sizes and compare which source cards appear — this is chunking's effect on retrieval precision made directly observable.
+
+---
+
+## Stage 2: Indexing — Building Structures That Enable Fast Retrieval
+
+Once chunks exist, they are indexed in two parallel structures: a vector index for semantic search and an inverted index for keyword search.
+
+### Vector indexing
+
+Each chunk is passed through an embedding model — in our demo, `Xenova/all-MiniLM-L6-v2`, a 384-dimensional model running entirely in the browser via ONNX/WebAssembly. The model converts text into a dense floating-point vector that encodes its semantic meaning.
+
+Vectors are normalized to unit length at generation time, which reduces cosine similarity to a simple dot product at query time — a critical performance optimisation at scale.
+
+These vectors are stored in IndexedDB. At small scale (thousands of chunks), an exact scan is fast enough. At millions of chunks, an Approximate Nearest Neighbour (ANN) index — HNSW, IVF-PQ, or ScaNN — is required to maintain sub-10ms retrieval latency.
+
+### BM25 inverted index
+
+BM25 (Best Match 25, or Okapi BM25) is a probabilistic keyword retrieval function. It builds an inverted index: for each term in the corpus, a list of which chunks contain it and how many times.
+
+At query time, BM25 scores each chunk using:
+
+```
+Score(q, d) = Σ IDF(t) × [tf(t,d) × (k₁+1)] / [tf(t,d) + k₁ × (1 - b + b × |d|/avgdl)]
+```
+
+Where:
+- **tf(t,d)** — term frequency: how often term `t` appears in chunk `d`
+- **IDF(t)** — inverse document frequency: `log(1 + (N - df + 0.5) / (df + 0.5))` — rare terms score higher than common terms
+- **|d| / avgdl** — length normalisation: prevents long chunks from winning simply because they repeat terms more
+- **k₁ = 1.2** — controls term frequency saturation. After a term appears ~3-4 times, additional occurrences add diminishing returns
+- **b = 0.75** — controls how strongly length normalisation is applied
+
+The inverted index in the demo is stored entirely in IndexedDB — no external search engine, no Elasticsearch, no Solr. One record per term, mapping chunk IDs to their term frequencies.
+
+---
+
+## Stage 3: Retrieval — The Heart of the Pipeline
+
+This is where precision and recall become concrete engineering decisions, not abstract metrics.
+
+### Precision and Recall in Information Retrieval
+
+Before going further, these terms need to be precisely defined in the RAG context.
+
+**Precision** — of the chunks you retrieved, what fraction are actually relevant?
+```
+Precision = Relevant chunks retrieved / Total chunks retrieved
+```
+
+If you retrieve 10 chunks and 7 are relevant to the query, precision = 0.7.
+
+**Recall** — of all the relevant chunks that exist in the corpus, what fraction did you retrieve?
+```
+Recall = Relevant chunks retrieved / Total relevant chunks in corpus
+```
+
+If there are 20 relevant chunks in the corpus and you retrieved 7 of them, recall = 0.35.
+
+**The fundamental tension:** Retrieving more chunks increases recall (you catch more relevant ones) but decreases precision (you also catch more irrelevant ones). Retrieving fewer chunks increases precision but decreases recall.
+
+In RAG, this tension directly affects answer quality:
+- **Low precision:** The LLM prompt is polluted with irrelevant context. The model either ignores it (wasted tokens) or incorporates it (wrong answer).
+- **Low recall:** The relevant chunk that would have answered the question was never retrieved. The model either admits it doesn't know or hallucinates.
+
+There is no universal optimum. The right balance depends on your domain, your chunk size, and your reranking strategy.
+
+### Precision@K and Recall@K
+
+In practice, retrieval systems are evaluated at a specific cutoff K — the number of results returned. The standard metrics become:
+
+**Precision@K** — of the K chunks retrieved, what fraction are relevant?
+```
+P@K = Relevant chunks in top K / K
+```
+
+**Recall@K** — of all relevant chunks in the corpus, what fraction appear in the top K?
+```
+R@K = Relevant chunks in top K / Total relevant chunks
+```
+
+In RAG systems, K is typically your top-K parameter — the number of chunks injected into the LLM prompt. Setting K=4 means you are operating at P@4 and R@4. This is one of the most important knobs in your system.
+
+### Mean Reciprocal Rank (MRR)
+
+MRR measures how high the first relevant chunk appears in your ranking. If the most relevant chunk is ranked 1st, MRR = 1.0. If it's ranked 5th, MRR = 0.2.
+
+```
+MRR = (1/|Q|) × Σ (1 / rank of first relevant chunk for query q)
+```
+
+MRR matters because the LLM processes context in order. A highly relevant chunk buried at position 15 in a list of 15 is not as useful as the same chunk at position 1. Research on LLM attention patterns (the "lost in the middle" problem) shows models disproportionately weight context that appears at the beginning and end of the prompt. MRR optimisation — getting the most relevant chunk to the top — is a direct lever on answer quality.
+
+### Normalized Discounted Cumulative Gain (NDCG)
+
+NDCG goes further than MRR by handling graded relevance — where some chunks are highly relevant, some partially relevant, and some not relevant at all.
+
+```
+DCG@K = Σ (relevance_score_i / log₂(i+1))
+NDCG@K = DCG@K / IDCG@K
+```
+
+Where IDCG is the DCG of the ideal ranking (most relevant chunks first). NDCG = 1.0 means your ranking is perfect. NDCG = 0.5 means you have significant room to improve.
+
+**Why this matters for RAG:** A ranking that puts two highly relevant chunks in positions 1 and 2, then three weakly relevant chunks in positions 3-5, is measurably better than a ranking that puts one highly relevant chunk at position 3 and fills the top 2 with weakly relevant chunks. NDCG captures this distinction. MRR does not.
+
+### Mean Average Precision (MAP)
+
+MAP averages the precision at each position where a relevant chunk is found, across all queries.
+
+```
+AP(q) = (1/R) × Σ P@k × rel(k)   [where rel(k) = 1 if chunk at position k is relevant]
+MAP = (1/|Q|) × Σ AP(q)
+```
+
+MAP penalises you both for retrieving irrelevant chunks and for retrieving relevant chunks late. It is the most complete single-number summary of ranking quality across a query set.
+
+### Which metric to use?
+
+| Metric | Best for | Blind to |
+|---|---|---|
+| Precision@K | Minimising noise in the prompt | Late relevant results, partial relevance |
+| Recall@K | Ensuring relevant info is captured | Irrelevant results in top K |
+| MRR | Optimising for first relevant hit | Order of subsequent relevant results |
+| NDCG@K | Graded relevance, full ranking quality | Binary relevant/not-relevant setups |
+| MAP | Complete ranking quality across queries | Graded relevance |
+
+In practice: use **NDCG@10** as your primary retrieval quality metric during development. Use **Precision@K** to tune your final top-K prompt injection. Use **Recall@K** to validate that your retrieval is not missing critical documents.
+
+---
+
+## Stage 4: Hybrid Retrieval — Why Neither Vector Nor BM25 Alone Is Enough
+
+Vector search and BM25 fail in complementary ways. This is not a coincidence — it follows from their fundamental designs.
+
+**Vector search fails at:** exact term matching. Searching for "ISO 27001 Section 6.1.2" in a document corpus will return chunks about information security in general. The embedding model has learned that "ISO 27001" and "information security" are semantically related and surfaces both. But the user wanted the specific section, not general context.
+
+**BM25 fails at:** semantic equivalence. "Heart attack" and "myocardial infarction" mean the same thing. BM25 sees two completely different term sets and matches neither to queries using the other. Vector search handles this naturally.
+
+**Hybrid fusion:**
 ```
 fusedScore = α × vectorScore + (1-α) × normalizedBM25Score
 ```
 
-Neither approach dominates universally. The right balance depends on your domain:
-- **Legal, compliance, financial documents** → lean BM25. Exact clause references matter more than semantic proximity.
-- **Conceptual knowledge bases, FAQs, support docs** → lean vector. Users paraphrase; exact terms vary.
-- **Mixed corpora** → start at 50/50 and tune based on user feedback.
+Normalising BM25 scores to [0,1] before fusion is non-optional. Raw BM25 scores are unbounded positive numbers. A score of 4.7 from BM25 and a cosine similarity of 0.73 from the vector search are not directly comparable until BM25 is normalised by the maximum BM25 score in the result set.
 
-**See it live:** The demo runs both retrieval paths simultaneously and shows both scores on every retrieved source card — Vector Cosine and BM25 Score side by side. Use the **Weights slider** to shift the balance and observe which chunks rise and fall in ranking. Enable **Benchmark Mode** to run all three strategies — Vector Only, BM25 Only, and Hybrid — in parallel on the same query and compare results directly.
+**Effect on precision and recall:**
+- Hybrid retrieval consistently outperforms either approach alone on both precision and recall across mixed document types
+- The optimal α varies by domain: exact-match-heavy domains (legal, financial, technical) → lower α (more BM25); conceptual domains (research, FAQs) → higher α (more vector)
+- Tuning α changes the precision-recall tradeoff — leaning BM25 increases precision for exact queries, leaning vector increases recall for semantically varied queries
 
----
-
-## 3. Reranking Is Not Optional at Any Scale
-
-Your first-stage retrieval — whether ANN vector search or BM25 — is optimized for speed, not accuracy. It scores the query and each document chunk *independently*. It does not jointly reason about whether this specific query and this specific chunk are a good match.
-
-A cross-encoder reranker does exactly that. It reads the query and the chunk together and outputs a single relevance score. It is slower (one model call per candidate chunk) but far more accurate.
-
-**The standard two-stage pattern:**
-1. Fast retrieval returns top 30 candidates in milliseconds
-2. Reranker scores all 30, takes 150-300ms
-3. Top K (typically 4-6) go into the LLM prompt
-
-Skipping reranking means the chunks you feed to the LLM are ordered by a heuristic approximation of relevance, not actual relevance. The LLM will try to work with whatever it gets — and if the most relevant chunk is ranked 12th and the least relevant is ranked 1st, your answer quality suffers proportionally.
-
-**Two reranking approaches worth knowing:**
-
-*Syntactic proximity reranking:* No model required. Measures how closely together query keywords appear within each chunk. A chunk where "data" and "pipeline" appear within 3 words of each other scores higher than one where they appear 200 words apart. Fast, interpretable, zero cost.
-
-*Neural cross-encoder reranking:* Uses a model like `ms-marco-MiniLM-L-6-v2` — trained specifically on query-passage relevance using the MS MARCO dataset. Understands paraphrasing, context, and intent in ways that no heuristic can.
-
-**See it live:** Switch the **Stage 2 Reranking** dropdown between *None*, *Syntactic (Query Proximity Window)*, and *Neural (Cross-Encoder)*. The Observability Trace logs the reranking step explicitly, showing which chunks moved up or down and what their final confidence scores are. With Neural selected, the demo downloads and runs a real ONNX cross-encoder model entirely in your browser via WebAssembly — no server involved.
+**See it live:** Enable Benchmark Mode in the demo to run Vector Only, BM25 Only, and Hybrid side by side on the same query. The retrieved source cards for each method show different chunks with different scores. On a query like "who is Vishal Mysore", the BM25 path retrieves chunks where those exact words appear; the vector path retrieves chunks about career and professional background; the hybrid path retrieves the most relevant combination of both.
 
 ---
 
-## 4. Source Confidence Scoring Must Gate Your Pipeline
+## Stage 5: Reranking — Fixing the Order After Retrieval
 
-Every chunk that enters your LLM prompt should carry a confidence score. Not as a decoration — as a gate.
+First-stage retrieval is optimised for speed, not ranking quality. The bi-encoder model that powers vector search embeds the query and each chunk *independently* — it never actually reads them together. BM25 scores term overlap without any understanding of context.
 
-If your retrieval system cannot find chunks above a minimum confidence threshold, **do not generate.** Return "The available documents do not contain sufficient information to answer this question." This is the system working correctly. A confident hallucinated answer is not better than an honest admission of insufficient information — it is far worse, especially in regulated domains.
+Reranking is the second stage: take the top-30 candidates from fusion and re-score them with a model that reads query and chunk *jointly*.
 
-**Confidence components to consider:**
-- Retrieval score (fusion of vector + BM25)
-- Source freshness (older documents get a decay penalty)
-- Source authority (internal audited documents outrank random web imports)
-- Cross-chunk agreement (multiple chunks saying the same thing raises confidence)
+### Syntactic proximity reranking
 
-The specific weights depend on your domain. What matters is having the concept: retrieval has to earn the right to generate.
+No model required. Measures how tightly query keywords cluster within each chunk.
 
-**See it live:** Every source card in the demo shows a **Confidence %** — the final weighted score after retrieval and reranking. Watch it change as you adjust chunk size, retrieval weights, and reranking method. The hallucination detection layer downstream uses this confidence as one of its inputs.
+For query `"machine learning pipeline"` and a chunk containing those three words:
+- If they appear within 5 words of each other → high proximity score
+- If they are spread across 300 words → low proximity score
+
+```
+proximityScore = termDensity × 0.6 + (1 / (1 + minSpan/5)) × 0.4
+```
+
+**Effect on precision:** High. Chunks where query terms cluster tightly are almost always more relevant than chunks where the same terms are scattered. This reranker raises precision without requiring a model download.
+
+**Blind spot:** It cannot detect semantic relevance. A chunk that answers the question perfectly using synonyms scores zero if no query tokens are present.
+
+### Neural cross-encoder reranking
+
+The `ms-marco-MiniLM-L-6-v2` model was trained on the MS MARCO dataset — 8.8 million real search queries paired with human-judged relevant passages. It takes `[query, chunk]` as a concatenated input and outputs a relevance score.
+
+Unlike the bi-encoder used for vector search, the cross-encoder has full attention over both query and chunk simultaneously. It can detect:
+- Semantic equivalence across different word choices
+- Partial relevance (the chunk addresses part of the question)
+- Query intent (distinguishing "how to fix X" from "what is X")
+
+**Effect on MRR and NDCG:** Neural reranking consistently improves both. In standard IR benchmarks, adding a cross-encoder reranker to a bi-encoder retrieval system improves NDCG@10 by 15-25% on average.
+
+**The cost:** One model inference per candidate chunk. At 30 candidates, that is 30 sequential inference calls. In the demo running in a browser via ONNX/WebAssembly, this takes 150-400ms depending on the device. In a GPU-accelerated production backend, it takes 20-50ms total with batching.
+
+**See it live:** Switch the Stage 2 Reranking dropdown to Neural. The Observability Trace shows the reranking step. Compare the order of source cards in the Retrieved Sources panel before and after — chunks that moved up were judged more relevant by the cross-encoder than the bi-encoder had rated them.
 
 ---
 
-## 5. Your System Prompt Is an Engineering Artifact, Not an Afterthought
+## Stage 6: The Precision-Recall Tradeoff Across the Full Pipeline
 
-The system prompt is where you enforce the contract between retrieval and generation. It is the mechanism by which you prevent the LLM from supplementing retrieved context with its own training knowledge.
+Every parameter in your RAG system shifts the precision-recall balance. Understanding which levers move which metric is the difference between systematic tuning and random experimentation.
 
-A weak system prompt:
-```
-Use the following documents to answer the question.
-```
+| Parameter | Increase → | Effect on Precision | Effect on Recall |
+|---|---|---|---|
+| Chunk size | Larger | ↓ Lower (more noise per chunk) | ↑ Higher (more context per chunk) |
+| Top-K | Higher K | ↓ Lower (more irrelevant chunks enter prompt) | ↑ Higher (more relevant chunks captured) |
+| Vector weight α | Higher α | Domain-dependent | Domain-dependent |
+| Reranking | Neural > Syntactic > None | ↑ Higher (better chunks ranked top) | Neutral (same pool) |
+| Confidence threshold | Higher threshold | ↑ Higher (stricter gate) | ↓ Lower (more queries return no answer) |
 
-A production system prompt:
+**The key insight:** Reranking improves precision without affecting recall — it rearranges the same pool of candidates, pushing relevant chunks to the top without adding or removing any. This makes it one of the most valuable levers in the pipeline. It is a precision improvement with no recall cost.
+
+Top-K, by contrast, is a direct precision-recall tradeoff. Every chunk you add beyond the most relevant ones reduces precision. Every chunk you remove risks losing a relevant one and reducing recall. The practical optimum for most use cases is K=4 to K=6 with good reranking, rather than K=10 to K=15 with poor reranking.
+
+---
+
+## Stage 7: Constrained Generation — Where Retrieval Meets the LLM
+
+Retrieved chunks reach the LLM through the system prompt. How that prompt is constructed determines whether the LLM uses the retrieved context faithfully or supplements it with its own training knowledge.
+
+This is where most RAG implementations have a silent flaw: they provide context but do not constrain the model to use only that context. The model, trained to be helpful, fills gaps with its training knowledge when the context is insufficient. This produces answers that are partially grounded and partially hallucinated — the worst possible combination, because they are difficult to detect and appear credible.
+
+**The constrained generation contract:**
 ```
-You are a citation-backed AI assistant. Answer using ONLY the 
-provided Context sections. For every claim, include a [Source N] 
-citation. If the Context does not contain the answer, respond with:
+System: You are a citation-backed AI assistant. Answer using ONLY 
+the provided Context sections. For every claim, include [Source N].
+If the Context does not contain sufficient information, respond:
 "The provided documents do not contain sufficient information to 
-answer this question." Do NOT use knowledge from your training data.
-Do NOT speculate beyond what the Context explicitly states.
+answer this question." Do NOT use training data to fill gaps.
+Temperature: 0.0 or 0.1
 ```
 
-The difference is specificity. Vague instructions produce vague compliance. Explicit rules — cite every claim, never use training data, use exact fallback phrasing when unsure — produce consistent, verifiable behavior.
+**Temperature is a precision knob for generation.** Higher temperature = more creative responses = higher probability of drifting from provided context. For RAG, set temperature at 0.0 or 0.1. RAG is a precision task, not a creative one.
 
-**Temperature matters here too.** Set it to `0.0` or `0.1` for RAG. RAG is a precision task, not a creative one. Every degree of temperature you add increases the probability of the model drifting from the provided context.
-
-**See it live:** The Observability Trace in the demo logs a `PROMPT ASSEMBLY` step for every query. This is where the retrieved chunks are formatted with `[Source N: filename (Page X)]` headers and injected into the constrained system prompt. The exact structure of this prompt is what drives the `[Source 1]` citation badges in the generated answer.
+**Prompt position matters.** Research on LLM attention ("lost in the middle", Liu et al. 2023) shows models give disproportionate weight to content at the beginning and end of the context window. The most relevant chunk should be positioned first. This is another reason reranking matters — it puts the highest-confidence chunk where the model will attend to it most strongly.
 
 ---
 
-## 6. Citations Are Not a Feature — They Are a Requirement
+## Stage 8: Faithfulness and Hallucination Detection
 
-A RAG system without verifiable citations is not a knowledge system — it is a text generator with a retrieval preprocessing step. Citations are what make the output auditable, trustworthy, and correctable.
+Constrained generation dramatically reduces hallucination. It does not eliminate it. Even with an explicit "do not use training data" instruction, models occasionally:
 
-**What citations enable:**
-- Users can verify any claim against the source document
-- Incorrect answers can be traced back to the exact chunk that caused them
-- You can identify which documents are consistently producing bad outputs
-- Compliance and audit teams have a paper trail for every AI-generated statement
+- Paraphrase a chunk in a way that subtly alters its meaning
+- Combine information from two chunks in a way that neither alone supports
+- Generate a precise-sounding number that does not appear in any retrieved chunk
+- Produce an answer that is technically grounded but misleadingly incomplete
 
-**What good citations look like in practice:**
-- Inline references in the response text: `The policy was updated in Q3 2023 [Source 2]`
-- Each citation links to the exact source document, version, and page number
-- The chunk text used is stored alongside the response — not just the document name
+**Faithfulness** measures how well the generated answer is supported by the retrieved context:
 
-**See it live:** In the demo, generated answers contain clickable `[Source N]` badges. Click any badge and the page scrolls directly to the source card showing the exact chunk text, document name, page number, vector score, BM25 score, and confidence. This is the citation chain made tangible — from claim, to chunk, to document.
+```
+Faithfulness = verified assertions / total assertions
+```
+
+Where assertions are extracted from the response — numbers, proper nouns, technical terms, dates, percentages — and each is checked for presence in the retrieved chunks.
+
+**The faithfulness-completeness tradeoff:** A response that says nothing can never hallucinate. A response that is comprehensive is more useful but has more surface area for hallucination. The right operating point is not maximum faithfulness (which produces vacuous answers) — it is high faithfulness with a warning system that fires when the model drifts.
+
+**Threshold design:**
+- faithfulness > 0.9 → show response, no warning
+- 0.8 ≤ faithfulness ≤ 0.9 → show response with soft warning
+- faithfulness < 0.8 → show response with prominent hallucination alert listing unverified claims
+- faithfulness < 0.5 → suppress response, return to retrieval step with relaxed parameters
+
+**See it live:** The demo computes faithfulness after every query and displays it in the Evaluation Metrics panel. The Hallucination Alert banner fires when faithfulness drops below threshold, listing the specific assertions that could not be grounded in the retrieved context.
 
 ---
 
-## 7. Build a Hallucination Detection Layer Before the Response Reaches Users
+## Stage 9: Continuous Evaluation — The Metrics That Matter in Production
 
-Constrained generation and good retrieval dramatically reduce hallucination. They do not eliminate it. LLMs can still:
-- Paraphrase a chunk inaccurately
-- Combine information from two chunks in a way that is not supported by either
-- Generate a plausible-sounding number that appears nowhere in the context
-- Synthesize an answer that is technically grounded but misleadingly incomplete
+RAG systems degrade silently. New documents change the embedding distribution. A model update changes generation patterns. A spike in query diversity hits retrieval patterns the system was not tuned for. Without continuous evaluation, you find out from users, not from your monitoring system.
 
-You need an automated detection pass that runs on every generated response before it is shown to the user.
+### The three core RAG evaluation metrics
 
-**A practical three-pass approach:**
-
-*Pass 1 — Assertion extraction:* Pull out all verifiable claims from the response. Numbers, dates, percentages, proper nouns, named entities, technical terms.
-
-*Pass 2 — Grounding check:* For each extracted assertion, verify that it appears in the retrieved context. Fuzzy matching — the model paraphrases, so exact string match is too strict. Threshold: if the assertion is not findable with >70% similarity in any retrieved chunk, flag it.
-
-*Pass 3 — Faithfulness score:*
+**Context Relevance** — retrieval quality metric
 ```
-faithfulness = verified_assertions / total_assertions
+contextRelevance = |queryTokens ∩ contextTokens| / |queryTokens|
 ```
-Below 0.8 with flagged assertions → surface a warning. Show the specific claims that could not be verified. Do not suppress the response — surfacing uncertainty is more honest and more useful than hiding it.
+If this is low, your retrieval is broken. The chunks reaching the LLM are not relevant to the question. No generation improvement will fix this — it is a retrieval problem.
 
-**See it live:** The demo computes faithfulness automatically on every query and displays the score in the **Evaluation Metrics** panel. When faithfulness drops below threshold, the **Hallucination Alert** banner appears above the generated answer, listing the specific unverified claims. This runs entirely in the browser — no external eval API.
+**Faithfulness** — generation quality metric
+```
+faithfulness = verified assertions / total assertions
+```
+If this is low with good context relevance, your constrained generation is failing. The model is drifting from the provided context. Tighten the system prompt and reduce temperature.
+
+**Answer Relevance** — end-to-end quality metric
+```
+answerRelevance = |queryTokens ∩ answerTokens| / |queryTokens|
+```
+High context relevance + low answer relevance = the model is ignoring the context. This often indicates a prompt structure problem where the context is too long and the model is attending only to the system instructions.
+
+### Additional production metrics
+
+**Retrieval diversity** — are your top-K chunks always coming from the same 2-3 documents? Low diversity indicates your embedding space is too clustered or your corpus lacks coverage on the query domain.
+
+**Latency percentiles (p50/p95/p99)** — track per stage: embedding generation, ANN search, BM25 scan, fusion, reranking, LLM call, eval. p95 and p99 latency often reveal bottlenecks invisible in averages.
+
+**Cache hit rate** — in production with real user traffic, expect 30-50% of queries to be near-duplicates. A cache hit rate below 20% suggests your cache invalidation logic is too aggressive or your query distribution is too diverse for caching to help.
+
+**User rejection rate** — the ground truth. When users click "this answer is wrong", log the query, the retrieved chunks, the generated answer, and all eval scores. This data is your most valuable dataset for systematic improvement.
+
+**See it live:** After every query, the demo displays Context Relevance, Faithfulness, Answer Relevance, and Latency — computed locally in the browser. Adjust chunk size, retrieval weights, and reranking method, and watch how the metrics respond. This is the fastest feedback loop available for developing intuition about what actually moves RAG quality.
 
 ---
 
-## 8. Continuous Evaluation Is the Only Way to Know Your System Is Working
+## Stage 10: Caching, Memory, and Getting Smarter Over Time
 
-The most dangerous RAG failure mode is silent degradation. Your retrieval quality drops because new documents changed the index distribution. Your faithfulness score trends down because a recent model update changed generation behavior. Nobody notices because there are no evals running.
+A RAG pipeline that produces the same quality on day 365 as on day 1 is not learning from its operation. Production RAG systems should improve continuously.
 
-**The three metrics every RAG system must track continuously:**
+### Caching
 
-**Context Relevance** — Are the retrieved chunks actually relevant to the query?
+**Exact cache:** Hash `(query + retrieval config + model)` → cache the full result. TTL tied to source document freshness. When a cached query's source documents are updated, invalidate the cache entry for that query.
+
+**Semantic cache:** For incoming queries, compute the embedding and check cosine similarity against cached query embeddings. Similarity > 0.95 → return cached result. This handles paraphrased repetitions without storing an entry per phrasing variant.
+
+### Long-term memory from human feedback
+
+When an expert corrects a wrong answer, that correction is structured knowledge. Store it:
+```json
+{
+  "correction": "The termination clause applies only to fixed-term contracts.",
+  "triggered_by": "What does the termination clause cover?",
+  "tags": ["termination", "contract", "fixed-term"],
+  "domain": "legal"
+}
 ```
-contextRelevance = queryTokens ∩ contextTokens / |queryTokens|
-```
-If this is low, your retrieval is broken. The LLM is working with the wrong information regardless of how good the model is.
 
-**Faithfulness** — Does the generated response stay grounded in the retrieved context?
-```
-faithfulness = verified_claims / total_claims
-```
-If this is low, your generation constraints are too weak or your chunks are too noisy.
-
-**Answer Relevance** — Does the response actually answer the question that was asked?
-```
-answerRelevance = queryTokens ∩ answerTokens / |queryTokens|
-```
-High context relevance but low answer relevance means the model is ignoring the retrieved context — a system prompt problem.
-
-Track these per query, aggregate over rolling windows, alert on degradation. If faithfulness drops below 0.75 over a 1-hour window, something has changed and someone needs to look at it.
-
-**See it live:** The demo computes and displays all three metrics live after every query — no API call, no external service. Watch how the scores change as you adjust chunk size, retrieval weights, and reranking method. This is the fastest feedback loop available for developing intuition about what actually moves these numbers.
+On future similar queries, retrieve relevant corrections and inject them at the top of the system prompt. The model now has institutional knowledge that was not present in the original documents. This is how RAG systems accumulate accuracy over time without retraining the model or re-embedding the corpus.
 
 ---
 
-## 9. Caching and Memory Are Force Multipliers
+## The Hero: Putting It All Together
 
-In any production RAG system with real user traffic, a significant percentage of queries are semantically identical or near-identical to queries that have already been answered. Recomputing the full pipeline — embedding generation, ANN search, BM25 scan, fusion, reranking, LLM call — for every one of these is wasteful and adds unnecessary latency.
+The difference between a RAG prototype and a production RAG system is not which LLM you use. It is the engineering discipline applied to every layer between the user's query and the model's response.
 
-**Two levels of caching to implement:**
+The hero-level RAG engineer understands:
 
-*Exact query cache:* Hash the query + retrieval config + model identifier. If seen before and the source documents haven't changed since the cache was written, return the cached result. Latency drops from seconds to milliseconds.
-
-*Semantic cache:* For incoming queries, check if a semantically similar query (cosine similarity > 0.95) has been answered recently. Return the cached result with a note. Handles paraphrased repetitions — "What is the refund policy?" and "How do I get a refund?" often have the same answer.
-
-**Memory beyond caching:**
-
-Session memory keeps track of what has been discussed in a conversation, so users don't have to repeat context across turns.
-
-Long-term correction memory is more powerful: when a human expert flags an answer as wrong and provides the correct information, store that correction tagged with the query topic and domain. On future similar queries, retrieve and inject the correction into the system prompt. This is how your RAG system accumulates institutional knowledge over time without retraining.
-
-**See it live:** Run a query in the demo, then run the exact same query again. The Observability Trace shows `CACHE HIT` on the second run and returns in milliseconds. Toggle **Use Retrieval Cache** off to force a fresh pipeline run and see the full latency comparison. The cache is stored in IndexedDB — it persists across page refreshes and survives until you explicitly clear it.
+- **Chunking is a precision-recall decision**, not a preprocessing step. Every size choice has measurable consequences on retrieval quality.
+- **BM25 and vector search fail in complementary ways.** Neither is optional. Hybrid retrieval is not an advanced feature — it is the baseline.
+- **Precision@K, Recall@K, MRR, NDCG, and MAP** are not academic metrics. They are the vocabulary for diagnosing and fixing retrieval problems systematically rather than by intuition.
+- **Reranking improves precision without reducing recall.** It is the highest-ROI improvement available to a functioning retrieval system.
+- **The system prompt is an engineering contract**, not a suggestion. Constrained generation with citations is what separates a trustworthy RAG system from a sophisticated autocomplete.
+- **Faithfulness is measurable and must be measured continuously.** Silent degradation is the failure mode that costs the most.
+- **Retrieval quality matters more than model quality.** A perfectly retrieved set of 5 chunks with a mid-tier model produces a better answer than a frontier model working from poorly retrieved context.
 
 ---
 
-## 10. Observability Is Not Logging — It Is Understanding What Your Pipeline Is Doing
+## Experience the Full Pipeline
 
-Most teams add logging as an afterthought. They log errors. They log the final response. They have no visibility into what happened in between — which chunks were retrieved, what scores they carried, why the reranker promoted chunk 12 above chunk 1, what the system prompt looked like, whether the eval passed.
+The [Advanced Local RAG Demo](https://vishalmysore.github.io/advancedRagDemo/) implements every stage described in this article — running entirely in your browser, with zero backend, zero cloud costs, and zero data leaving your device.
 
-When something goes wrong at 2am — and it will go wrong — you need to reconstruct the exact execution path of any query within minutes.
+**What you can observe:**
 
-**What to instrument on every query:**
-- Timing for every stage: embedding generation, vector search, BM25 search, fusion, reranking, LLM call, eval
-- Which documents were retrieved and their scores at each stage
-- The exact system prompt sent to the model
-- The raw model response before any post-processing
-- Eval scores: context relevance, faithfulness, answer relevance
-- Cache hit or miss, and if miss, why (new query vs invalidated cache)
-- Any hallucination flags and the specific claims that triggered them
+- **Chunking tradeoffs:** Adjust Chunk Size and Overlap sliders, re-ingest a document, and run the same query. Watch precision and recall shift as chunk boundaries change.
+- **Hybrid retrieval:** Benchmark Mode runs Vector Only, BM25 Only, and Hybrid simultaneously on the same query. The difference in retrieved chunks is the precision-recall tradeoff made visible.
+- **Reranking effect on MRR:** Switch between None, Syntactic, and Neural reranking and observe how the order of source cards changes. The chunk that moves to position 1 is what the LLM will weight most heavily.
+- **Faithfulness measurement:** Every query produces a live Faithfulness score. Run queries on documents where the answer is absent — watch faithfulness drop and the Hallucination Alert fire.
+- **Top-K precision tradeoff:** Adjust the Retrieve Top-K slider from 1 to 10 and observe how answer quality and faithfulness change as more (potentially noisier) chunks enter the prompt.
+- **Caching in action:** Run a query twice. The second run returns a `CACHE HIT` in the Observability Trace and completes in milliseconds. Toggle the cache off to see full pipeline latency.
 
-The observability layer is also your primary debugging tool during development. Without it, RAG tuning is guesswork. With it, you can look at a bad answer and immediately see: the retrieval scores were low (retrieval problem), or the retrieval was good but faithfulness was 0.4 (generation constraint problem), or the chunk sizes are too small (chunking problem).
-
-**See it live:** The **RAG Pipeline Observability Trace** panel in the demo is a working implementation of this principle. Every stage logs what it did, in what order, at what time, and with what outcome — color-coded by layer type. This is the fastest way to develop an intuition for what a well-instrumented RAG pipeline looks like before you build one.
+Every slider, dropdown, and toggle in the demo is a direct implementation of one of the decisions described in this article. There is no faster way to build an intuition for RAG engineering than watching the metrics respond in real time to your choices.
 
 ---
 
-## The One Thing That Ties All 10 Together
-
-Each of these 10 areas is a distinct engineering concern. But they share a common thread: **RAG is a pipeline, not a model call.** The quality of the final answer is determined by the weakest link in the chain — bad chunking, missing reranking, no confidence gating, a vague system prompt, no evals — any one of these can neutralize the best LLM on the market.
-
-The teams that build reliable RAG systems are not the ones with access to the most powerful models. They are the ones who obsess over each layer of the pipeline, instrument everything, measure continuously, and treat retrieval quality as seriously as generation quality.
-
----
-
-## Explore the Full Pipeline Live
-
-The [Advanced Local RAG Demo](https://vishalmysore.github.io/advancedRagDemo/) is a fully working implementation of all 10 principles described in this article — running entirely in your browser, with no backend, no cloud costs, and no data leaving your device.
-
-**What you can do with it:**
-
-- Upload any PDF or text file and watch the chunking, embedding, and BM25 indexing happen in real time
-- Tune chunk size and overlap and observe how it changes retrieval quality on the same query
-- Switch between Vector Only, BM25 Only, and Hybrid retrieval in Benchmark Mode and compare results side by side
-- Toggle between Syntactic and Neural reranking and see how chunk ordering changes
-- Watch the Observability Trace log every pipeline stage with timestamps and scores
-- See Faithfulness, Context Relevance, and Answer Relevance computed live after every query
-- Click citation badges in the answer to trace any claim back to its exact source chunk
-- Observe the Hallucination Alert fire when generated claims cannot be grounded in retrieved context
-- Test the caching layer by running the same query twice and comparing latencies
-
-Every slider, toggle, and dropdown in the demo corresponds directly to one of the 10 engineering decisions described in this article. It is the fastest feedback loop available for building an intuition about what actually matters in a RAG pipeline — before you commit to a production architecture.
-
----
-
-*The demo is built with Vite, Transformers.js (ONNX/WASM), Dexie/IndexedDB, and a hand-rolled BM25 engine. Source available at [github.com/vishalmysore/advancedRagDemo](https://github.com/vishalmysore/advancedRagDemo).*
+*Demo source: [github.com/vishalmysore/advancedRagDemo](https://github.com/vishalmysore/advancedRagDemo) — Built with Vite, Transformers.js (ONNX/WASM), Dexie/IndexedDB, and a hand-rolled BM25 engine.*
