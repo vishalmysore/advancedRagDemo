@@ -4,11 +4,14 @@ import { parsePdf, parseTxt } from './utils/pdfParser.js'
 import { loadEmbeddingModel, loadRerankerModel } from './utils/embeddings.js'
 import { ingestDocument, executeRAGQuery } from './utils/ragEngine.js'
 import { PROVIDERS, setLLMConfig, getLLMConfig, testConnection } from './utils/llm.js'
+import { precisionAtK, recallAtK, mrr, ndcgAtK, averagePrecision, precisionRecallCurve, renderPRCurve } from './utils/irMetrics.js'
 
 
 // ── State management ──────────────────────────────────────────────
 let isProcessingFile = false
 let isExecutingQuery = false
+let lastRetrievedSources = []       // holds sources from last query for P&R labeling
+let relevanceLabels = []            // parallel array: true=relevant, false=not relevant, null=unlabeled
 
 // ── DOM Elements ──────────────────────────────────────────────────
 // Config Banner
@@ -65,6 +68,20 @@ const evalAnswerRelevance = document.getElementById('evalAnswerRelevance')
 const evalLatency = document.getElementById('evalLatency')
 const sourcesContainer = document.getElementById('sourcesContainer')
 
+// Precision & Recall Tab
+const tabResponse        = document.getElementById('tabResponse')
+const tabPrecisionRecall = document.getElementById('tabPrecisionRecall')
+const prPanel            = document.getElementById('prPanel')
+const prChunkList        = document.getElementById('prChunkList')
+const prCurveContainer   = document.getElementById('prCurveContainer')
+const prP1               = document.getElementById('prP1')
+const prP3               = document.getElementById('prP3')
+const prPK               = document.getElementById('prPK')
+const prRK               = document.getElementById('prRK')
+const prMRR              = document.getElementById('prMRR')
+const prNDCG             = document.getElementById('prNDCG')
+const prAP               = document.getElementById('prAP')
+
 // Benchmark Panel Output
 const benchmarkResponseDesk = document.getElementById('benchmarkResponseDesk')
 const benchVectorBody = document.getElementById('benchVectorBody')
@@ -77,9 +94,117 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadLLMConfigFromStorage()
   bindParameterSliders()
   bindEventHandlers()
+  bindTabHandlers()
   await refreshDocumentList()
   appendLog('system', 'Observability Log Initialised. Ready to process files.', 'info-step')
 })
+
+// ── Tab Switching ─────────────────────────────────────────────────
+function bindTabHandlers() {
+  tabResponse.addEventListener('click', () => switchRightTab('response'))
+  tabPrecisionRecall.addEventListener('click', () => switchRightTab('pr'))
+}
+
+function switchRightTab(tab) {
+  if (tab === 'response') {
+    tabResponse.classList.add('active')
+    tabPrecisionRecall.classList.remove('active')
+    prPanel.classList.add('hidden')
+    // Show whichever response desk is currently active
+    standardResponseDesk.style.display = ''
+    benchmarkResponseDesk.style.display = ''
+  } else {
+    tabPrecisionRecall.classList.add('active')
+    tabResponse.classList.remove('active')
+    prPanel.classList.remove('hidden')
+    standardResponseDesk.style.display = 'none'
+    benchmarkResponseDesk.style.display = 'none'
+    // Render current sources if available
+    renderPRChunks()
+  }
+}
+
+// ── Precision & Recall Panel ──────────────────────────────────────
+
+function renderPRChunks() {
+  if (lastRetrievedSources.length === 0) {
+    prChunkList.innerHTML = '<div class="pr-empty">Run a query first, then label the retrieved chunks here.</div>'
+    updatePRMetrics()
+    return
+  }
+
+  prChunkList.innerHTML = ''
+  lastRetrievedSources.forEach((src, idx) => {
+    const label = relevanceLabels[idx]   // true | false | null
+
+    const card = document.createElement('div')
+    card.className = 'pr-chunk-card' +
+      (label === true ? ' labeled-relevant' : label === false ? ' labeled-irrelevant' : '')
+    card.id = `pr-card-${idx}`
+
+    card.innerHTML = `
+      <div class="pr-chunk-rank">#${idx + 1}</div>
+      <div class="pr-chunk-body">
+        <div class="pr-chunk-doc">${src.docName} · Page ${src.pageNumber}</div>
+        <div class="pr-chunk-text">${src.text}</div>
+        <div class="pr-chunk-scores">
+          Vec: ${src.vectorScore?.toFixed(3) || '0.000'} &nbsp;|&nbsp;
+          BM25: ${src.bm25Score?.toFixed(2) || '0.00'} &nbsp;|&nbsp;
+          Conf: ${Math.round((src.confidence || 0) * 100)}%
+        </div>
+      </div>
+      <div class="pr-chunk-actions">
+        <button class="pr-btn ${label === true ? 'rel-active' : ''}" data-idx="${idx}" data-val="true">✓ Relevant</button>
+        <button class="pr-btn ${label === false ? 'irrel-active' : ''}" data-idx="${idx}" data-val="false">✗ Not Relevant</button>
+      </div>
+    `
+
+    // Bind label buttons
+    card.querySelectorAll('.pr-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = parseInt(btn.dataset.idx)
+        const val = btn.dataset.val === 'true'
+        // Toggle off if already labeled same way
+        relevanceLabels[i] = relevanceLabels[i] === val ? null : val
+        renderPRChunks()
+        updatePRMetrics()
+      })
+    })
+
+    prChunkList.appendChild(card)
+  })
+
+  updatePRMetrics()
+}
+
+function updatePRMetrics() {
+  const K = lastRetrievedSources.length
+  // Build binary relevance array — unlabeled treated as not relevant for metric calc
+  const rel = relevanceLabels.slice(0, K).map(v => v === true)
+  const labeled = relevanceLabels.slice(0, K).filter(v => v !== null).length
+
+  if (labeled === 0) {
+    // No labels yet — show dashes
+    ;[prP1, prP3, prPK, prRK, prMRR, prNDCG, prAP].forEach(el => { el.textContent = '—' })
+    renderPRCurve(prCurveContainer, [], 0)
+    return
+  }
+
+  const fmt = v => `${(v * 100).toFixed(1)}%`
+
+  prP1.textContent   = fmt(precisionAtK(rel, 1))
+  prP3.textContent   = fmt(precisionAtK(rel, Math.min(3, K)))
+  prPK.textContent   = fmt(precisionAtK(rel, K))
+  prRK.textContent   = fmt(recallAtK(rel, K))
+  prMRR.textContent  = fmt(mrr(rel))
+  prNDCG.textContent = fmt(ndcgAtK(rel, K))
+
+  const ap = averagePrecision(rel)
+  prAP.textContent   = fmt(ap)
+
+  const curve = precisionRecallCurve(rel)
+  renderPRCurve(prCurveContainer, curve, ap)
+}
 
 // ── Observability Trace Logger ────────────────────────────────────
 function appendLog(stepName, message, typeClass = 'info-step') {
@@ -571,6 +696,12 @@ async function handleQuerySubmission() {
 
       // 4. Render retrieved sources
       renderSources(result.sources)
+
+      // 5. Store sources for Precision & Recall tab
+      lastRetrievedSources = result.sources || []
+      relevanceLabels = new Array(lastRetrievedSources.length).fill(null)
+      // If P&R tab is active, refresh it immediately
+      if (!prPanel.classList.contains('hidden')) renderPRChunks()
 
       waitingResponse.classList.add('hidden')
       responseContainer.classList.remove('hidden')

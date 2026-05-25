@@ -657,6 +657,199 @@ input[type=range]::-webkit-slider-thumb:hover {
 .trace-entry.error-step .trace-label { color: var(--danger); }
 .trace-entry.error-step .trace-msg { color: var(--danger); font-weight: 600; }
 
+/* ── Right Column Tab Bar ────────────────────────────────────── */
+.right-tab-bar {
+  display: flex;
+  gap: 2px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px 0;
+  flex-shrink: 0;
+}
+
+.right-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 14px 8px;
+  border-radius: 6px 6px 0 0;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.right-tab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.right-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* ── Precision & Recall Panel ────────────────────────────────── */
+.pr-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 41px);
+  overflow-y: auto;
+  gap: 0;
+}
+
+.pr-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pr-metrics-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.pr-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.pr-metric-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 6px;
+  text-align: center;
+}
+.pr-metric-wide { grid-column: span 3; }
+
+.pr-metric-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -.02em;
+}
+
+.pr-metric-lbl {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.pr-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.pr-curve-block { display: flex; flex-direction: column; }
+
+.pr-curve-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  flex: 1;
+  min-height: 200px;
+}
+
+.pr-chunks-block {
+  padding: 12px;
+  flex: 1;
+}
+
+.pr-chunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pr-chunk-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  transition: border-color .2s;
+}
+.pr-chunk-card.labeled-relevant { border-color: var(--success); }
+.pr-chunk-card.labeled-irrelevant { border-color: var(--danger); }
+
+.pr-chunk-rank {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.pr-chunk-body { flex: 1; min-width: 0; }
+
+.pr-chunk-doc {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-chunk-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pr-chunk-scores {
+  font-size: 9.5px;
+  color: #4a5568;
+  margin-top: 4px;
+}
+
+.pr-chunk-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pr-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.pr-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.pr-btn.rel-active { background: rgba(34,197,94,0.15); border-color: var(--success); color: var(--success); }
+.pr-btn.irrel-active { background: rgba(248,81,73,0.15); border-color: var(--danger); color: var(--danger); }
+
+.pr-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 40px 20px;
+}
+
 /* ── Response Desk (Right Column) ────────────────────────────── */
 .response-desk-container {
   display: flex;

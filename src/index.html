@@ -215,7 +215,70 @@
 
     <!-- ── Right Column: Response Desk or Benchmark Desk ─────────── -->
     <section class="col col-right">
-      
+
+      <!-- ── Right Column Tab Bar ──────────────────────────────────── -->
+      <div class="right-tab-bar">
+        <button class="right-tab active" id="tabResponse">📝 Response</button>
+        <button class="right-tab" id="tabPrecisionRecall">📈 Precision &amp; Recall</button>
+      </div>
+
+      <!-- ── Precision & Recall Panel ──────────────────────────────── -->
+      <div id="prPanel" class="pr-panel hidden">
+
+        <div class="pr-top">
+          <!-- Metrics table -->
+          <div class="pr-metrics-block">
+            <div class="pr-metrics-title">IR Metrics</div>
+            <div class="pr-metrics-grid">
+              <div class="pr-metric-cell">
+                <div class="pr-metric-val" id="prP1">—</div>
+                <div class="pr-metric-lbl">P@1</div>
+              </div>
+              <div class="pr-metric-cell">
+                <div class="pr-metric-val" id="prP3">—</div>
+                <div class="pr-metric-lbl">P@3</div>
+              </div>
+              <div class="pr-metric-cell">
+                <div class="pr-metric-val" id="prPK">—</div>
+                <div class="pr-metric-lbl">P@K</div>
+              </div>
+              <div class="pr-metric-cell">
+                <div class="pr-metric-val" id="prRK">—</div>
+                <div class="pr-metric-lbl">R@K</div>
+              </div>
+              <div class="pr-metric-cell">
+                <div class="pr-metric-val" id="prMRR">—</div>
+                <div class="pr-metric-lbl">MRR</div>
+              </div>
+              <div class="pr-metric-cell">
+                <div class="pr-metric-val" id="prNDCG">—</div>
+                <div class="pr-metric-lbl">NDCG@K</div>
+              </div>
+              <div class="pr-metric-cell pr-metric-wide">
+                <div class="pr-metric-val" id="prAP">—</div>
+                <div class="pr-metric-lbl">Avg Precision (AUC-PR)</div>
+              </div>
+            </div>
+            <p class="pr-hint">Label chunks below as relevant ✓ or not relevant ✗ to compute metrics.</p>
+          </div>
+
+          <!-- P-R Curve SVG -->
+          <div class="pr-curve-block">
+            <div class="pr-metrics-title">Precision–Recall Curve</div>
+            <div id="prCurveContainer" class="pr-curve-container"></div>
+          </div>
+        </div>
+
+        <!-- Chunk labeling -->
+        <div class="pr-chunks-block">
+          <div class="pr-metrics-title">Retrieved Chunks — Relevance Labeling</div>
+          <div id="prChunkList" class="pr-chunk-list">
+            <div class="pr-empty">Run a query first to label retrieved chunks.</div>
+          </div>
+        </div>
+
+      </div>
+
       <!-- Standard Mode Desk -->
       <div id="standardResponseDesk" class="response-desk-container">
         
