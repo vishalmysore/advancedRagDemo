@@ -12,6 +12,17 @@
   <link rel="stylesheet" href="./styles.css" />
   <!-- PDF.js CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+  <!-- coi-serviceworker: injects COOP/COEP headers so WebGPU works on GitHub Pages -->
+  <script>
+    if (typeof SharedArrayBuffer === "undefined") {
+      const sw = navigator.serviceWorker;
+      if (sw) {
+        sw.register("./coi-serviceworker.js").then(() => {
+          if (!sw.controller) window.location.reload();
+        });
+      }
+    }
+  </script>
 </head>
 <body>
   
@@ -30,27 +41,22 @@
     <div class="banner-center">
       <div class="config-row">
         <div class="config-field">
-          <label>LLM Provider</label>
-          <select id="providerSelect"></select>
-        </div>
-        <div class="config-field">
-          <label>Model Name</label>
+          <label>WebLLM Model <span class="key-note">(runs on your GPU — no API key needed)</span></label>
           <select id="modelSelect"></select>
-        </div>
-        <div class="config-field api-field">
-          <label>API Key <span class="key-note">(not saved — enter each session)</span></label>
-          <input id="apiKeyInput" type="password" placeholder="sk-…" autocomplete="off" />
-        </div>
-        <div class="config-field proxy-field">
-          <label>CORS Proxy <button id="resetProxyBtn" class="btn-inline" title="Reset proxy">↺</button></label>
-          <input id="proxyInput" type="text" placeholder="https://..." />
         </div>
         <div class="config-field test-field">
           <label>&nbsp;</label>
-          <button id="testConnectionBtn" class="btn btn-test">🧪 Test API</button>
+          <button id="loadModelBtn" class="btn btn-test">⚡ Load Model</button>
+        </div>
+        <div class="config-field" style="min-width:260px">
+          <label>&nbsp;</label>
+          <div id="modelStatus" class="model-status-idle">Not loaded — select a model and click Load</div>
         </div>
       </div>
-      <div id="testResult" class="test-result hidden"></div>
+      <div id="modelProgressBar" class="model-progress-wrap hidden">
+        <div id="modelProgressFill" class="model-progress-fill" style="width:0%"></div>
+        <span id="modelProgressLabel" class="model-progress-label">Initialising…</span>
+      </div>
     </div>
 
     <div class="banner-right">

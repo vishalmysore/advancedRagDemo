@@ -3,7 +3,7 @@ import { db, deleteDocument, getDocumentStats, clearAllData } from './utils/db.j
 import { parsePdf, parseTxt } from './utils/pdfParser.js'
 import { loadEmbeddingModel, loadRerankerModel } from './utils/embeddings.js'
 import { ingestDocument, executeRAGQuery } from './utils/ragEngine.js'
-import { PROVIDERS, setLLMConfig, getLLMConfig, testConnection } from './utils/llm.js'
+import { WEBLLM_MODELS, loadModel, getModelStatus, cancelLoad } from './utils/llm.js'
 import { precisionAtK, recallAtK, mrr, ndcgAtK, averagePrecision, precisionRecallCurve, renderPRCurve } from './utils/irMetrics.js'
 
 
@@ -14,14 +14,13 @@ let lastRetrievedSources = []       // holds sources from last query for P&R lab
 let relevanceLabels = []            // parallel array: true=relevant, false=not relevant, null=unlabeled
 
 // ── DOM Elements ──────────────────────────────────────────────────
-// Config Banner
-const providerSelect = document.getElementById('providerSelect')
-const modelSelect = document.getElementById('modelSelect')
-const apiKeyInput = document.getElementById('apiKeyInput')
-const proxyInput = document.getElementById('proxyInput')
-const resetProxyBtn = document.getElementById('resetProxyBtn')
-const testConnectionBtn = document.getElementById('testConnectionBtn')
-const testResult = document.getElementById('testResult')
+// Config Banner — WebLLM model selector
+const modelSelect    = document.getElementById('modelSelect')
+const loadModelBtn   = document.getElementById('loadModelBtn')
+const modelStatusEl  = document.getElementById('modelStatus')
+const modelProgressBar   = document.getElementById('modelProgressBar')
+const modelProgressFill  = document.getElementById('modelProgressFill')
+const modelProgressLabel = document.getElementById('modelProgressLabel')
 const dbStatsBadge = document.getElementById('dbStatsBadge')
 const clearDbBtn = document.getElementById('clearDbBtn')
 
@@ -90,8 +89,7 @@ const benchHybridBody = document.getElementById('benchHybridBody')
 
 // ── Bootstrapping ─────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  initProvidersDropdown()
-  loadLLMConfigFromStorage()
+  initModelDropdown()
   bindParameterSliders()
   bindEventHandlers()
   bindTabHandlers()
@@ -262,91 +260,71 @@ function handleModelDownloadProgress(event) {
   }
 }
 
-// ── LLM Provider Configuration Dropdowns ────────────────────────
-function initProvidersDropdown() {
-  providerSelect.innerHTML = ''
-  PROVIDERS.forEach(p => {
+// ── WebLLM Model Selector ────────────────────────────────────────
+function initModelDropdown() {
+  WEBLLM_MODELS.forEach(m => {
     const opt = document.createElement('option')
-    opt.value = p.id
-    opt.textContent = `${p.icon} ${p.name}`
-    providerSelect.appendChild(opt)
+    opt.value = m.id
+    opt.textContent = m.name
+    modelSelect.appendChild(opt)
   })
 
-  providerSelect.addEventListener('change', () => {
-    updateModelsDropdown()
-    saveLLMConfigToStorage()
-  })
-
-  modelSelect.addEventListener('change', saveLLMConfigToStorage)
-  apiKeyInput.addEventListener('input', saveLLMConfigToStorage)
-  proxyInput.addEventListener('input', saveLLMConfigToStorage)
-
-  updateModelsDropdown()
+  // Restore last used model selection (not the loaded model — just the UI choice)
+  const saved = localStorage.getItem('rag_webllm_model')
+  if (saved && WEBLLM_MODELS.find(m => m.id === saved)) modelSelect.value = saved
+  modelSelect.addEventListener('change', () => localStorage.setItem('rag_webllm_model', modelSelect.value))
 }
 
-function updateModelsDropdown() {
-  const pId = providerSelect.value
-  const provider = PROVIDERS.find(p => p.id === pId)
-  modelSelect.innerHTML = ''
+function setModelStatus(state, text) {
+  modelStatusEl.className = `model-status-${state}`
+  modelStatusEl.textContent = text
+}
 
-  if (provider) {
-    provider.models.forEach(m => {
-      const opt = document.createElement('option')
-      opt.value = m.id
-      opt.textContent = m.name
-      modelSelect.appendChild(opt)
+async function handleLoadModel() {
+  const modelId = modelSelect.value
+  if (!modelId) return
+
+  loadModelBtn.disabled = true
+  modelSelect.disabled  = true
+  modelProgressBar.classList.remove('hidden')
+  modelProgressFill.style.width = '0%'
+  modelProgressLabel.textContent = 'Initialising WebGPU…'
+  setModelStatus('loading', 'Loading…')
+  appendLog('webllm', `Loading model: ${modelId}`, 'info-step')
+
+  try {
+    await loadModel(modelId, (ev) => {
+      if (ev.type === 'device') {
+        modelProgressLabel.textContent = 'WebGPU detected — starting download…'
+        appendLog('webllm', 'WebGPU adapter detected.', 'info-step')
+      } else if (ev.type === 'downloading') {
+        modelProgressFill.style.width = `${ev.progress}%`
+        modelProgressLabel.textContent = `Downloading… ${ev.progress}%`
+        setModelStatus('loading', `Downloading ${ev.progress}%`)
+      } else if (ev.type === 'phase' && ev.phase === 'compile') {
+        modelProgressFill.style.width = '80%'
+        modelProgressLabel.textContent = 'Compiling WebGPU shaders… (may take a few minutes first time)'
+        setModelStatus('loading', 'Compiling shaders…')
+        appendLog('webllm', ev.note ?? 'Compiling WebGPU shaders…', 'info-step')
+      } else if (ev.type === 'ready') {
+        modelProgressFill.style.width = '100%'
+      } else if (ev.type === 'error') {
+        appendLog('error', `Model load error: ${ev.error}`, 'error-step')
+      }
     })
-    apiKeyInput.placeholder = provider.keyPlaceholder
-    
-    // Toggle api-key fields based on Provider
-    if (pId === 'mock') {
-      apiKeyInput.disabled = true
-      apiKeyInput.value = ''
-    } else {
-      apiKeyInput.disabled = false
-    }
-  }
-}
 
-function loadLLMConfigFromStorage() {
-  const stored = localStorage.getItem('rag_llm_config')
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored)
-      providerSelect.value = parsed.provider || 'mock'
-      updateModelsDropdown()
-      modelSelect.value = parsed.model || 'mock-rag-agent'
-      // apiKey is NOT restored from storage (session only — matches harnessEngineeringDemo)
-      apiKeyInput.value = ''
-      proxyInput.value = parsed.proxyUrl || getLLMConfig().proxyUrl
-    } catch (e) {
-      console.error('Error parsing stored LLM config', e)
-    }
-  } else {
-    proxyInput.value = getLLMConfig().proxyUrl
-  }
-  applyConfigChange()
-}
+    setModelStatus('ready', `Ready — ${modelId.split('-').slice(0, 3).join(' ')}`)
+    appendLog('webllm', `Model ready: ${modelId}`, 'eval-step')
+    setTimeout(() => modelProgressBar.classList.add('hidden'), 1200)
 
-function saveLLMConfigToStorage() {
-  // Do NOT save apiKey to localStorage (security — session only, matches harnessEngineeringDemo pattern).
-  // Only persist non-sensitive preferences: provider, model, proxyUrl.
-  const cfg = {
-    provider: providerSelect.value,
-    model: modelSelect.value,
-    proxyUrl: proxyInput.value
+  } catch (err) {
+    setModelStatus('error', `Error: ${err.message}`)
+    appendLog('error', `Failed to load model: ${err.message}`, 'error-step')
+    modelProgressBar.classList.add('hidden')
+  } finally {
+    loadModelBtn.disabled = false
+    modelSelect.disabled  = false
   }
-  localStorage.setItem('rag_llm_config', JSON.stringify(cfg))
-  applyConfigChange()
-}
-
-function applyConfigChange() {
-  setLLMConfig({
-    provider: providerSelect.value,
-    model: modelSelect.value,
-    apiKey: apiKeyInput.value,
-    proxyUrl: proxyInput.value
-  })
 }
 
 // ── Parameters and Sliders ──────────────────────────────────────
@@ -470,39 +448,8 @@ async function refreshDocumentList() {
 
 // ── Bind UI Event Listeners ──────────────────────────────────────
 function bindEventHandlers() {
-  // Test connection button
-  testConnectionBtn.addEventListener('click', async () => {
-    // Always sync config from UI first (matches harnessEngineeringDemo pattern)
-    applyConfigChange()
-    const cfg = getLLMConfig()
-    if (cfg.provider !== 'mock' && !cfg.apiKey) {
-      testResult.classList.remove('hidden')
-      testResult.className = 'test-result test-result-fail'
-      testResult.textContent = 'Connection failed: No API key entered. Please enter your API key above.'
-      return
-    }
-
-    testConnectionBtn.disabled = true
-    testResult.classList.remove('hidden')
-    testResult.className = 'test-result test-result-ok'
-    testResult.textContent = 'Verifying connection...'
-
-    try {
-      const res = await testConnection()
-      testResult.textContent = `Success! Response: "${res.text}" (Latency: ${res.latencyMs}ms)`
-    } catch (e) {
-      testResult.className = 'test-result test-result-fail'
-      testResult.textContent = `Connection failed: ${e.message}`
-    } finally {
-      testConnectionBtn.disabled = false
-    }
-  })
-
-  // Reset proxy button
-  resetProxyBtn.addEventListener('click', () => {
-    proxyInput.value = 'https://quantumstudio.visrow.workers.dev/'
-    saveLLMConfigToStorage()
-  })
+  // Load WebLLM model
+  loadModelBtn.addEventListener('click', handleLoadModel)
 
   // Clear DB
   clearDbBtn.addEventListener('click', async () => {
@@ -556,11 +503,9 @@ async function handleQuerySubmission() {
   if (!query) return
   if (isExecutingQuery) return
 
-  // Always sync config from UI before executing (matches harnessEngineeringDemo pattern)
-  applyConfigChange()
-  const cfg = getLLMConfig()
-  if (cfg.provider !== 'mock' && !cfg.apiKey) {
-    alert('Please enter your API key in the configuration bar, or switch to Mock AI to test without one.')
+  const { status: modelStatus } = getModelStatus()
+  if (modelStatus !== 'ready') {
+    alert('Please load a WebLLM model first — select a model and click "Load Model".')
     return
   }
 
@@ -581,10 +526,10 @@ async function handleQuerySubmission() {
     topK: parseInt(sliderTopK.value),
     rerankType,
     useCache: checkUseCache.checked,
-    llmProvider: providerSelect.value,
-    llmModel: modelSelect.value,
-    apiKey: apiKeyInput.value,
-    proxyUrl: proxyInput.value
+    llmProvider: 'webllm',
+    llmModel: getModelStatus().modelId ?? 'webllm',
+    apiKey: '',
+    proxyUrl: ''
   }
 
   // Pre-load Cross Encoder model if selected to prevent timing logs from overlapping downloads

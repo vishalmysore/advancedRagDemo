@@ -1,320 +1,149 @@
-// llm.js — Multi-provider LLM API client with proxy routing
-// Supported: OpenAI, Anthropic, Google Gemini, NVIDIA NIM, and Mock AI
+// llm.js — WebLLM client: runs LLM inference locally in the browser via WebGPU.
+// No cloud API keys or CORS proxies required.
 
-const DEFAULT_PROXY = 'https://quantumstudio.visrow.workers.dev/'
-
-export const PROVIDERS = [
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    icon: '🤖',
-    keyPlaceholder: 'sk-…',
-    endpoint: 'https://api.openai.com/v1/chat/completions',
-    models: [
-      { id: 'gpt-4o',      name: 'GPT-4o (recommended)' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini (fast)' },
-      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
-    ],
-    format: 'openai',
-  },
-  {
-    id: 'gemini',
-    name: 'Google Gemini',
-    icon: '✨',
-    keyPlaceholder: 'AIza…',
-    endpoint: 'https://generativelanguage.googleapis.com',
-    models: [
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (recommended)' },
-      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
-      { id: 'gemini-1.5-pro',   name: 'Gemini 1.5 Pro' },
-    ],
-    format: 'openai', // handles Gemini API key via URL query parameter
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    icon: '🧬',
-    keyPlaceholder: 'sk-ant-…',
-    endpoint: 'https://api.anthropic.com/v1/messages',
-    models: [
-      { id: 'claude-3-5-sonnet-20241022',   name: 'Claude 3.5 Sonnet' },
-      { id: 'claude-3-5-haiku-20241022',    name: 'Claude 3.5 Haiku' },
-    ],
-    format: 'anthropic',
-  },
-  {
-    id: 'nvidia',
-    name: 'NVIDIA NIM',
-    icon: '🟢',
-    keyPlaceholder: 'nvapi-…',
-    endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
-    models: [
-      { id: 'meta/llama-3.1-70b-instruct',            name: 'Llama 3.1 70B Instruct' },
-      { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama 3.1 Nemotron 70B' },
-      { id: 'nvidia/nemotron-nano-12b-v2-vl',         name: 'Nano 12B V2 (lightweight)' },
-    ],
-    format: 'openai',
-  },
-  {
-    id: 'mock',
-    name: 'Mock AI',
-    icon: '🧪',
-    keyPlaceholder: 'No key needed',
-    endpoint: 'mock',
-    models: [
-      { id: 'mock-rag-agent', name: 'Mock RAG Responder (Local)' },
-    ],
-    format: 'mock',
-  },
+export const WEBLLM_MODELS = [
+  { id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC',  name: 'Llama 3.2 1B  (~0.9 GB) — fastest' },
+  { id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',  name: 'Qwen 2.5 1.5B (~1.1 GB) — fast' },
+  { id: 'gemma-2-2b-it-q4f16_1-MLC',           name: 'Gemma 2 2B   (~1.5 GB) — balanced' },
+  { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',  name: 'Llama 3.2 3B  (~2.0 GB) — good' },
+  { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',  name: 'Phi-3.5 Mini  (~2.2 GB) — best quality' },
 ]
 
-let _config = {
-  provider: 'mock',
-  apiKey: '',
-  model: 'mock-rag-agent',
-  proxyUrl: _loadProxyUrl(),
-}
+// ── Worker singleton ──────────────────────────────────────────────
 
-function _loadProxyUrl() {
-  try { return localStorage.getItem('rag_proxy_url') || DEFAULT_PROXY } catch { return DEFAULT_PROXY }
-}
+let _worker      = null
+let _status      = 'idle'   // idle | loading | ready | error
+let _modelId     = null
+let _genCounter  = 0
 
-export function setLLMConfig(cfg) {
-  _config = { ..._config, ...cfg }
-  if (cfg.proxyUrl !== undefined) {
-    try { localStorage.setItem('rag_proxy_url', cfg.proxyUrl || DEFAULT_PROXY) } catch { /* ignore */ }
+// Pending promise callbacks keyed by type
+let _loadResolve = null
+let _loadReject  = null
+let _genResolve  = null
+let _genReject   = null
+
+// Progress callback set by loadModel caller
+let _onProgress  = null
+
+function _ensureWorker() {
+  if (_worker) return
+  _worker = new Worker(new URL('../worker.js', import.meta.url), { type: 'module' })
+  _worker.onmessage = _handleWorkerMessage
+  _worker.onerror   = (e) => {
+    _status = 'error'
+    const msg = e.message ?? 'Worker crashed'
+    if (_loadReject)  { _loadReject(new Error(msg));  _loadResolve = _loadReject = null }
+    if (_genReject)   { _genReject(new Error(msg));   _genResolve  = _genReject  = null }
   }
 }
 
-export function getLLMConfig() {
-  return { ..._config, proxyUrl: _config.proxyUrl || DEFAULT_PROXY }
+function _handleWorkerMessage(e) {
+  const msg = e.data
+
+  switch (msg.status) {
+    case 'device_detected':
+      _onProgress?.({ type: 'device', device: msg.device })
+      break
+
+    case 'phase':
+      _onProgress?.({ type: 'phase', phase: msg.phase, note: msg.note })
+      break
+
+    case 'downloading':
+      _onProgress?.({ type: 'downloading', file: msg.file, progress: msg.progress })
+      break
+
+    case 'ready':
+      _status  = 'ready'
+      _modelId = msg.modelId
+      _onProgress?.({ type: 'ready', modelId: msg.modelId })
+      if (_loadResolve) { _loadResolve(msg.modelId); _loadResolve = _loadReject = null }
+      break
+
+    case 'success':
+      if (_genResolve) {
+        _genResolve({ text: msg.generatedText, latencyMs: Math.round(msg.elapsedMs), tokensPerSec: msg.tokensPerSec })
+        _genResolve = _genReject = null
+      }
+      break
+
+    case 'error':
+      _status = _status === 'loading' ? 'error' : _status
+      const err = new Error(msg.error)
+      _onProgress?.({ type: 'error', error: msg.error })
+      if (_loadReject)  { _status = 'error'; _loadReject(err);  _loadResolve = _loadReject = null }
+      if (_genReject)   { _genReject(err);   _genResolve  = _genReject  = null }
+      break
+
+    case 'cancelled':
+    case 'disposed':
+      _status  = 'idle'
+      _modelId = null
+      break
+  }
 }
 
-export function getProviderDef(providerId) {
-  return PROVIDERS.find(p => p.id === (providerId || _config.provider))
+// ── Public API ────────────────────────────────────────────────────
+
+export function getModelStatus() {
+  return { status: _status, modelId: _modelId }
 }
 
 /**
- * Call the selected LLM provider.
+ * Load a WebLLM model into the worker.
+ * @param {string} modelId — from WEBLLM_MODELS
+ * @param {Function} onProgress — called with {type, ...} progress events
+ * @returns {Promise<string>} resolves with modelId when ready
+ */
+export function loadModel(modelId, onProgress) {
+  _ensureWorker()
+  _status     = 'loading'
+  _onProgress = onProgress ?? null
+  _genCounter++
+
+  return new Promise((resolve, reject) => {
+    _loadResolve = resolve
+    _loadReject  = reject
+    _worker.postMessage({ action: 'load', modelId, gen: _genCounter })
+  })
+}
+
+/**
+ * callLLM — Send a RAG prompt to the loaded WebLLM model.
+ * Signature matches the original cloud-provider callLLM so ragEngine.js needs no changes.
+ *
  * @param {Array<{role: string, content: string}>} messages
  * @param {string} systemPrompt
- * @param {Array<object>} retrievedChunks - Pass chunks here to support Mock AI grounding
+ * @param {Array} _retrievedChunks — unused (kept for API compat)
  * @returns {Promise<{text: string, rawResponse: object, latencyMs: number}>}
  */
-export async function callLLM(messages, systemPrompt, retrievedChunks = []) {
-  const { provider, apiKey, model, proxyUrl } = getLLMConfig()
-  const providerDef = getProviderDef(provider)
-  if (!providerDef) throw new Error(`Unknown provider: ${provider}`)
-  
-  if (provider !== 'mock' && !apiKey) {
-    throw new Error('API Key is missing. Please enter your API key in the configuration bar.')
+export async function callLLM(messages, systemPrompt, _retrievedChunks = []) {
+  if (_status !== 'ready' || !_worker) {
+    throw new Error('No model loaded. Load a WebLLM model first using the model selector.')
   }
 
-  const start = Date.now()
-  const proxy = proxyUrl || DEFAULT_PROXY
-
-  // Handle Mock mode locally
-  if (provider === 'mock') {
-    await new Promise(r => setTimeout(r, 800)) // simulate network delay
-    const userQuery = messages[messages.length - 1]?.content || ''
-    const generatedText = generateMockRagResponse(userQuery, retrievedChunks)
-    return {
-      text: generatedText,
-      rawResponse: { mock: true, sourcesUsed: retrievedChunks.length },
-      latencyMs: Date.now() - start
+  _genCounter++
+  return new Promise((resolve, reject) => {
+    _genResolve = ({ text, latencyMs, tokensPerSec }) => {
+      resolve({ text, rawResponse: { webllm: true, tokensPerSec }, latencyMs })
     }
-  }
-
-  if (providerDef.format === 'anthropic') {
-    const data = await _callAnthropic(messages, systemPrompt, model, apiKey, proxy)
-    return {
-      text: data.content?.[0]?.text || '',
-      rawResponse: data,
-      latencyMs: Date.now() - start
-    }
-  }
-
-  // OpenAI format (including NVIDIA and Gemini compatibility)
-  const data = await _callOpenAIFormat(messages, systemPrompt, model, apiKey, proxy, providerDef)
-  
-  let text = ''
-  if (provider === 'gemini') {
-    text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-  } else {
-    text = data.choices?.[0]?.message?.content || ''
-  }
-
-  return {
-    text,
-    rawResponse: data,
-    latencyMs: Date.now() - start
-  }
-}
-
-// ── Call Implementations ──────────────────────────────────────────
-
-async function _callOpenAIFormat(messages, systemPrompt, model, apiKey, proxy, providerDef) {
-  const targetUrl = providerDef.id === 'gemini'
-    ? `${providerDef.endpoint}/v1beta/models/${model}:generateContent?key=${apiKey}`
-    : providerDef.endpoint
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-target-url': targetUrl,
-  }
-  if (providerDef.id !== 'gemini') {
-    headers['Authorization'] = `Bearer ${apiKey}`
-  }
-
-  let body
-  if (providerDef.id === 'gemini') {
-    // Convert messages to Gemini API format
-    const contents = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }))
-    // Prepend system prompt
-    body = {
-      contents,
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { temperature: 0.1 }
-    }
-  } else {
-    body = {
-      model,
-      temperature: 0.1,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
-    }
-  }
-
-  const res = await fetch(proxy, { method: 'POST', headers, body: JSON.stringify(body) })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data?.error?.message || `${providerDef.name} error ${res.status}`)
-  return data
-}
-
-async function _callAnthropic(messages, systemPrompt, model, apiKey, proxy) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-target-url': 'https://api.anthropic.com/v1/messages',
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-  }
-  // Convert 'system' message out of messages array for Anthropic
-  const anthropicMessages = messages.filter(m => m.role !== 'system')
-
-  const body = { 
-    model, 
-    system: systemPrompt, 
-    messages: anthropicMessages, 
-    max_tokens: 2048, 
-    temperature: 0.1 
-  }
-
-  const res = await fetch(proxy, { method: 'POST', headers, body: JSON.stringify(body) })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data?.error?.message || `Anthropic error ${res.status}`)
-  return data
-}
-
-// ── Mock RAG Synthesizer ──────────────────────────────────────────
-
-function generateMockRagResponse(query, chunks) {
-  if (chunks.length === 0) {
-    return `[Mock AI Response - No Context Found]
-I'm running locally in your browser. I searched the index but couldn't find any relevant text chunks matching your query: "${query}".
-
-Please upload a relevant PDF or text file first, or adjust your chunk size/retrieval parameters.`
-  }
-
-  // Synthesize an answer directly grounding in the top chunk texts
-  const topChunk = chunks[0]
-  const topText = topChunk.text
-  const docName = topChunk.docName || 'Uploaded File'
-  const pageNum = topChunk.pageNumber ? `, Page ${topChunk.pageNumber}` : ''
-  
-  // Extract a few sentences to make the answer look natural
-  const sentences = topText.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 5)
-  const keyFact = sentences[0] || topText.substring(0, 100)
-  const secondaryFact = sentences[1] || 'This document contains essential concepts regarding your query.'
-
-  return `[Mock AI Response - Local Browser-Native RAG]
-
-Based on the retrieved context from **${docName}**${pageNum} (which matched your query with a confidence score of **${(topChunk.confidence * 100).toFixed(1)}%**):
-
-"${keyFact}." [1]
-
-Furthermore, the document indicates that "${secondaryFact}." [1]
-
-*Note: Since you are using **Mock AI**, this response is synthesized locally using the actual text from your top matching document chunk to demonstrate the RAG pipeline. To generate high-quality, fully reasoned responses, add an API Key and select OpenAI, Gemini, or Anthropic.*`
+    _genReject = reject
+    _worker.postMessage({ action: 'generate', messages, systemPrompt, gen: _genCounter })
+  })
 }
 
 /**
- * testConnection — Verify the API key and proxy by sending a fast verification call.
+ * setLLMConfig — kept for API compat with ragEngine.js (no-op in WebLLM mode).
  */
-export async function testConnection() {
-  const { provider, apiKey, model, proxyUrl } = getLLMConfig()
-  const providerDef = getProviderDef(provider)
-  if (!providerDef) throw new Error(`Unknown provider: ${provider}`)
+export function setLLMConfig(_cfg) {}
 
-  if (provider === 'mock') {
-    await new Promise(r => setTimeout(r, 400))
-    return { text: 'OK (mock)', latencyMs: 400 }
-  }
+/**
+ * getLLMConfig — returns a minimal config object for compat with ragEngine.js.
+ */
+export function getLLMConfig() {
+  return { provider: 'webllm', model: _modelId ?? 'none', apiKey: '', proxyUrl: '' }
+}
 
-  if (!apiKey) throw new Error('No API key configured.')
-
-  const proxy = proxyUrl || DEFAULT_PROXY
-  const start = Date.now()
-
-  if (providerDef.format === 'anthropic') {
-    const res = await fetch(proxy, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-target-url': providerDef.endpoint,
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 10,
-        messages: [{ role: 'user', content: 'Say OK' }],
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data?.error?.message || `Anthropic error ${res.status}`)
-    return { text: data.content?.[0]?.text || 'OK', latencyMs: Date.now() - start }
-  }
-
-  // OpenAI format (including Gemini/Nvidia)
-  let targetUrl = providerDef.endpoint
-  if (provider === 'gemini') {
-    targetUrl = `${providerDef.endpoint}/v1beta/models/${model}:generateContent?key=${apiKey}`
-  }
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-target-url': targetUrl,
-  }
-  if (provider !== 'gemini') headers['Authorization'] = `Bearer ${apiKey}`
-
-  let body
-  if (provider === 'gemini') {
-    body = { contents: [{ parts: [{ text: 'Say OK' }] }], generationConfig: { maxOutputTokens: 10 } }
-  } else {
-    body = { model, max_tokens: 10, messages: [{ role: 'user', content: 'Say OK' }] }
-  }
-
-  const res = await fetch(proxy, { method: 'POST', headers, body: JSON.stringify(body) })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data?.error?.message || `${providerDef.name} error ${res.status}`)
-
-  let text = ''
-  if (provider === 'gemini') {
-    text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'OK'
-  } else {
-    text = data.choices?.[0]?.message?.content || 'OK'
-  }
-  return { text: text.trim(), latencyMs: Date.now() - start }
+export function cancelLoad() {
+  _worker?.postMessage({ action: 'cancel' })
 }
