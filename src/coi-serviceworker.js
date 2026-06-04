@@ -9,6 +9,12 @@ self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", function (event) {
   if (event.request.cache === "only-if-cached" && event.request.mode !== "same-origin") return;
 
+  // Only inject COEP/COOP headers for same-origin responses.
+  // Cross-origin CDN fetches (e.g. pdf.js, model weights) must pass through
+  // unmodified; wrapping them causes network errors under require-corp COEP.
+  const isSameOrigin = new URL(event.request.url).origin === self.location.origin;
+  if (!isSameOrigin) return;
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -23,6 +29,9 @@ self.addEventListener("fetch", function (event) {
           headers: newHeaders,
         });
       })
-      .catch((e) => console.error(e))
+      .catch((e) => {
+        console.error(e);
+        return new Response(null, { status: 503, statusText: "Service Unavailable" });
+      })
   );
 });
