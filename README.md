@@ -33,6 +33,25 @@ Normally, Retrieval-Augmented Generation (RAG) requires complex backend infrastr
 
 ---
 
+## ✂️ Chunking Lab (new)
+
+🔗 **Live:** [https://vishalmysore.github.io/advancedRagDemo/chunking.html](https://vishalmysore.github.io/advancedRagDemo/chunking.html)
+
+A second page that compares five chunking strategies from Sept–Oct 2026 research on the same document, retriever and context budget, scored on **complete-evidence recall** (did the context contain *every* fact the question needs?):
+
+| Strategy | Source |
+|---|---|
+| Fixed window | baseline |
+| Sentence window | baseline (same algorithm as `chunkDocument()`) |
+| Structure-aware: provision boundaries, heading path, cross-refs resolved | StrucChunk, [arXiv 2610.26313](https://arxiv.org/abs/2610.26313) |
+| QES exact DP / QES overlap greedy: supervised by question–evidence pairs | QESChunker, [arXiv 2610.36557](https://arxiv.org/abs/2610.36557) |
+
+Retrieval can be flat BM25 top-k or a **chunk graph** (SpectRAG-lite, [arXiv 2610.36991](https://arxiv.org/abs/2610.36991)): adjacency / provision / cross-ref / lexical edges, personalised PageRank from BM25 seeds, token-budgeted assembly. Views: scoreboard, recall-vs-budget curve, boundary map, per-question inspector, chunk graph. Paste your own markdown + question–evidence JSON to test your documents. No model downloads; everything is in `src/utils/chunkLab.js`.
+
+![Chunking Lab scoreboard](screenshots/01-scoreboard.png)
+
+---
+
 ## Project Structure
 
 ```
@@ -46,6 +65,7 @@ src/
 │   ├── eval.js           # Local evaluation metrics
 │   └── ragEngine.js      # Orchestrates chunking, hybrid search, rerank, and fallback check
 ├── index.html            # Dark-mode dashboard layout
+├── chunking.html/.js/.css # Chunking Lab page
 ├── styles.css            # Premium glassmorphic stylesheet
 └── main.js               # Application coordinator and UI event binder
 ```

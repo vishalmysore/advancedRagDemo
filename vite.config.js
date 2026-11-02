@@ -12,6 +12,12 @@ export default defineConfig(({ command }) => ({
     outDir: '../dist',
     emptyOutDir: true,
     target: 'esnext',
+    rollupOptions: {
+      input: {
+        main: new URL('./src/index.html', import.meta.url).pathname,
+        chunking: new URL('./src/chunking.html', import.meta.url).pathname,
+      },
+    },
   },
   worker: {
     format: 'es',

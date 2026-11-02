@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chunking Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./chunking.css" />
+</head>
+<body class="lab">
+  <header class="lab-header">
+    <div class="app-logo">
+      <span class="logo-icon">✂️</span>
+      <div>
+        <div class="app-title">Chunking Lab</div>
+        <div class="app-sub">Five chunkers from Sept–Oct 2026 papers, scored on <b>complete</b>-evidence recall · runs in your tab</div>
+      </div>
+    </div>
+    <nav class="lab-nav">
+      <a class="btn btn-ghost" href="./index.html">← RAG pipeline</a>
+      <a class="btn btn-ghost" href="https://github.com/vishalmysore/advancedRagDemo" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="lab-main">
+    <!-- Controls -->
+    <section class="panel lab-controls" id="controls">
+      <div class="ctl">
+        <div class="slider-header"><label class="field-label">Max chunk size</label><span class="param-val" id="vL">450 chars</span></div>
+        <input type="range" id="sL" min="200" max="900" step="50" value="450" />
+      </div>
+      <div class="ctl">
+        <div class="slider-header"><label class="field-label">Context budget</label><span class="param-val" id="vB">120 words</span></div>
+        <input type="range" id="sB" min="40" max="400" step="10" value="120" />
+      </div>
+      <div class="ctl">
+        <label class="field-label">Evaluate on</label>
+        <div class="seg" id="segSplit">
+          <button data-v="test" class="on">Held-out</button><button data-v="train">QES train</button><button data-v="all">All</button>
+        </div>
+      </div>
+      <div class="ctl">
+        <label class="field-label">Retrieval</label>
+        <div class="seg" id="segMode">
+          <button data-v="flat" class="on">Flat top-k</button><button data-v="graph">Chunk graph</button>
+        </div>
+      </div>
+      <div class="ctl ctl-checks">
+        <label><input type="checkbox" id="cHeaders" /> Heading path on every chunk</label>
+        <label><input type="checkbox" id="cRefs" checked /> Resolve cross-refs (structure-aware)</label>
+      </div>
+      <div class="ctl ctl-end">
+        <button class="btn btn-ghost" id="btnCorpus">✎ Corpus &amp; Q/E pairs</button>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="corpusPanel">
+      <div class="panel-header"><span class="panel-icon">📄</span><span>Corpus (markdown headings like <code>### 2.3 Check-in</code>) and question–evidence pairs (JSON)</span></div>
+      <div class="corpus-grid">
+        <textarea id="taDoc" spellcheck="false"></textarea>
+        <textarea id="taQE" spellcheck="false"></textarea>
+      </div>
+      <div class="corpus-actions">
+        <span id="corpusMsg" class="muted"></span>
+        <button class="btn btn-ghost" id="btnReset">Restore sample</button>
+        <button class="btn btn-test" id="btnApply">Re-run</button>
+      </div>
+    </section>
+
+    <!-- Scoreboard -->
+    <section class="panel" id="scoreboard">
+      <div class="panel-header"><span class="panel-icon">🏁</span><span>Scoreboard</span><span class="hdr-note" id="sbNote"></span></div>
+      <div class="table-wrap"><table class="score-table" id="scoreTable"></table></div>
+      <p class="callout" id="callout"></p>
+    </section>
+
+    <div class="lab-two">
+      <!-- Budget curve -->
+      <section class="panel" id="curvePanel">
+        <div class="panel-header"><span class="panel-icon">📈</span><span>Complete-evidence recall vs context budget</span></div>
+        <div id="curve"></div>
+      </section>
+      <!-- Graph -->
+      <section class="panel" id="graphPanel">
+        <div class="panel-header"><span class="panel-icon">🕸</span><span>Chunk graph</span>
+          <select id="graphStrategy" class="mini-select"></select></div>
+        <div id="graph"></div>
+        <div class="legend" id="graphLegend"></div>
+      </section>
+    </div>
+
+    <!-- Boundary map -->
+    <section class="panel" id="mapPanel">
+      <div class="panel-header"><span class="panel-icon">🧭</span><span>Boundary map</span><span class="hdr-note">each bar is one chunk · gold bands = evidence for the selected question · outlined = retrieved</span></div>
+      <div id="map"></div>
+    </section>
+
+    <!-- Inspector -->
+    <section class="panel" id="inspector">
+      <div class="panel-header"><span class="panel-icon">🔎</span><span>Question inspector</span>
+        <select id="qSelect" class="q-select"></select></div>
+      <div class="insp-grid" id="inspGrid"></div>
+    </section>
+
+    <!-- Papers -->
+    <section class="panel" id="papers">
+      <div class="panel-header"><span class="panel-icon">📚</span><span>What is implemented here, and from where</span></div>
+      <div class="paper-grid" id="paperGrid"></div>
+    </section>
+
+    <footer class="lab-footer">Toy corpus, BM25 retrieval, 25 questions: an illustration of the ideas, not a benchmark. Everything runs locally. Source: <code>src/utils/chunkLab.js</code>.</footer>
+  </main>
+
+  <script type="module" src="./chunking.js"></script>
+</body>
+</html>
