@@ -213,7 +213,7 @@ const RENDER = {
     g += `<text class="axis" x="${(pl + W - pr) / 2}" y="${H - 2}" text-anchor="middle">edits to the handbook</text>`
     const line = (s, c) => `<polyline fill="none" stroke="${c}" stroke-width="2.4" points="${s.map(p => `${X(p[0])},${Y(p[1])}`).join(' ')}"/>`
     g += line(r.without.series, '#f85149') + line(r.with.series, '#3fb950')
-    g += `<text class="lbl" fill="#f85149" x="${X(maxX) - 10}" y="${Y(r.without.total) + 22}" text-anchor="end">no GC · ${num(r.without.total)} vectors</text>`
+    g += `<text class="lbl" fill="#f85149" x="${X(maxX * 0.6) - 8}" y="${Y(maxY * 0.6) - 12}" text-anchor="end">no GC · ${num(r.without.total)} vectors</text>`
     g += `<text class="lbl" fill="#3fb950" x="${X(maxX) - 4}" y="${Y(r.with.total) - 8}" text-anchor="end">with GC · ${num(r.with.total)} vectors</text>`
     return [
       `<div class="tiles">${tile(num(r.without.total), 'vectors after 300 edits', 'bad')}${tile(pct(r.without.stalePct), 'of the index is stale', 'bad')}</div>
