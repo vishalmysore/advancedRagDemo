@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Production Problems in RAG</title>
+  <meta name="description" content="Nine production failures of a RAG index, from full re-indexing to stale caches, each run live in your browser with and without its fix." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./chunking.css" />
+  <link rel="stylesheet" href="./production.css" />
+</head>
+<body class="lab prod">
+  <header class="lab-header">
+    <div class="app-logo">
+      <span class="logo-icon">🚨</span>
+      <div>
+        <div class="app-title">Production Problems in RAG</div>
+        <div class="app-sub">and how to solve them · nine failures of a live vector index, each run <b>with and without</b> its fix in your tab</div>
+      </div>
+    </div>
+    <nav class="lab-nav">
+      <a class="btn btn-ghost" href="./index.html">← RAG pipeline</a>
+      <a class="btn btn-ghost" href="./chunking.html">✂️ Chunking Lab</a>
+      <a class="btn btn-ghost" href="https://github.com/vishalmysore/advancedRagDemo" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="lab-main">
+    <section class="hero" id="hero">
+      <div class="hero-text">
+        <h1>Indexing a document is easy. <span>Keeping millions of vectors in sync with it is the job.</span></h1>
+        <p>Day one of a RAG system is chunk, embed, insert. Then people start editing documents. Each fix below solves one production problem and exposes the next. Every number on this page is computed live from a simulated index, so you can replay any step.</p>
+      </div>
+      <div class="hero-stats" id="heroStats"></div>
+    </section>
+
+    <nav class="tabbar" id="tabbar" role="tablist">
+      <button role="tab" data-tab="ladder" class="on">🪜 The nine problems</button>
+      <button role="tab" data-tab="chaos">🔥 Chaos week</button>
+    </nav>
+
+    <div class="tab-pane" id="tabLadder">
+      <div class="ladder-layout">
+        <aside class="rail" id="rail"></aside>
+        <section class="rung" id="rung"></section>
+      </div>
+    </div>
+
+    <div class="tab-pane hidden" id="tabChaos">
+      <section class="panel chaos-intro">
+        <div class="panel-header"><span class="panel-icon">🔥</span><span>One scripted week of production</span><span class="hdr-note">switch fixes on and off · the week is replayed against your configuration</span></div>
+        <div class="chaos-grid">
+          <div class="toggles" id="toggles"></div>
+          <div class="report" id="report"></div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="lab-footer">Simulation: 121 fictional documents, feature-hashed bag-of-words embeddings (two seeds = two incompatible models), an in-memory vector store with an async upsert queue. It illustrates the mechanics; it is not a benchmark of any vector database. Source: <code>src/utils/prodLab.js</code>.</footer>
+  </main>
+
+  <script type="module" src="./production.js"></script>
+</body>
+</html>

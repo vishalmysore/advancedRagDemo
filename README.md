@@ -52,6 +52,30 @@ Retrieval can be flat BM25 top-k or a **chunk graph** (SpectRAG-lite, [arXiv 261
 
 ---
 
+## 🚨 Production Problems in RAG (new)
+
+🔗 **Live:** [https://vishalmysore.github.io/advancedRagDemo/production.html](https://vishalmysore.github.io/advancedRagDemo/production.html)
+
+A third page about what happens after day one: keeping a vector index in sync with documents that keep changing. Nine production failures, each replayed live **without and with** its fix:
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | One edit re-embeds the whole corpus | Document ID on every chunk |
+| 2 | A one-sentence edit re-embeds the whole document | Content-hash every chunk |
+| 3 | The edit shifts every later chunk boundary | Stable, structure-anchored chunking |
+| 4 | A crash leaves v12 and v13 mixed together | Write each update as a new document version |
+| 5 | Search during a deploy returns half a document | Atomic version switch after every write lands |
+| 6 | Old versions pile up in the index | Garbage-collect superseded versions |
+| 7 | A model upgrade mixes two vector spaces | Track the embedding model on every vector |
+| 8 | The update event never reaches the indexer | Transactional outbox + reconciliation sweep |
+| 9 | The answer cache serves yesterday's answer | Key cached answers to source versions |
+
+A **Chaos week** tab replays a scripted week of production (edits, a crash, a deploy, a model upgrade, lost events, a stale cache) against the fixes you switch on and grades the result. Deep links: `production.html?rung=4`, `production.html?tab=chaos&fixes=docIds,hashing,stable,versioning`. Everything is simulated in `src/utils/prodLab.js` (feature-hashed embeddings, in-memory store with an async upsert queue); no model download.
+
+![Production Problems in RAG](screenshots/prod-00-hero.png)
+
+---
+
 ## Project Structure
 
 ```
@@ -63,9 +87,12 @@ src/
 │   ├── pdfParser.js      # PDF.js text extractor
 │   ├── llm.js            # Multi-provider LLM caller + CORS proxy wrapper
 │   ├── eval.js           # Local evaluation metrics
-│   └── ragEngine.js      # Orchestrates chunking, hybrid search, rerank, and fallback check
+│   ├── ragEngine.js      # Orchestrates chunking, hybrid search, rerank, and fallback check
+│   ├── prodLab.js        # Production Problems simulation: versioned index, 9 failure modes
+│   └── prodCorpus.js     # Handbook + knowledge-base corpus for the Production lab
 ├── index.html            # Dark-mode dashboard layout
 ├── chunking.html/.js/.css # Chunking Lab page
+├── production.html/.js/.css # Production Problems in RAG page
 ├── styles.css            # Premium glassmorphic stylesheet
 └── main.js               # Application coordinator and UI event binder
 ```

@@ -16,6 +16,7 @@ export default defineConfig(({ command }) => ({
       input: {
         main: new URL('./src/index.html', import.meta.url).pathname,
         chunking: new URL('./src/chunking.html', import.meta.url).pathname,
+        production: new URL('./src/production.html', import.meta.url).pathname,
       },
     },
   },
