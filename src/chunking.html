@@ -26,6 +26,48 @@
   </header>
 
   <main class="lab-main">
+    <nav class="tabbar" id="tabbar" role="tablist">
+      <button role="tab" data-tab="lab" class="on">🧪 Lab</button>
+      <button role="tab" data-tab="advisor">🧭 Strategy Advisor</button>
+    </nav>
+
+    <!-- ═══ Strategy Advisor tab ═══ -->
+    <div class="tab-pane hidden" id="tabAdvisor">
+      <section class="panel">
+        <div class="panel-header"><span class="panel-icon">1</span><span>What kind of document are you chunking?</span><span class="hdr-note">pick a category, or paste text below to detect it</span></div>
+        <div class="cat-grid" id="catGrid"></div>
+        <details class="detect" id="detectBox">
+          <summary>📋 Paste a document to auto-detect its category and preview the chunks</summary>
+          <div class="detect-body">
+            <div class="sample-row"><span class="muted">Try a sample:</span><span id="sampleBtns"></span></div>
+            <textarea id="taAdvisor" spellcheck="false" placeholder="Paste a contract, transcript, email thread, FAQ, CSV, code…"></textarea>
+            <div class="corpus-actions"><span id="detectMsg" class="muted"></span><button class="btn btn-test" id="btnDetect">Detect &amp; recommend</button></div>
+            <div id="profileOut"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel lab-controls">
+        <div class="ctl">
+          <label class="field-label">Context budget per question</label>
+          <div class="seg" id="segBudget"><button data-v="small">Small ≤150 words</button><button data-v="medium" class="on">Medium ~400</button><button data-v="large">Large 1000+</button></div>
+        </div>
+        <div class="ctl">
+          <label class="field-label">Retriever</label>
+          <div class="seg" id="segRetriever"><button data-v="bm25">BM25 only</button><button data-v="dense">Dense only</button><button data-v="hybrid" class="on">Hybrid</button></div>
+        </div>
+        <div class="ctl">
+          <label class="field-label">Question–evidence pairs?</label>
+          <div class="seg" id="segQE"><button data-v="no" class="on">No</button><button data-v="yes">Yes / can generate</button></div>
+        </div>
+      </section>
+
+      <section class="panel" id="recPanel"></section>
+      <section class="panel hidden" id="previewPanel"></section>
+    </div>
+
+    <!-- ═══ Lab tab ═══ -->
+    <div class="tab-pane" id="tabLab">
     <!-- Controls -->
     <section class="panel lab-controls" id="controls">
       <div class="ctl">
@@ -110,10 +152,12 @@
       <div class="panel-header"><span class="panel-icon">📚</span><span>What is implemented here, and from where</span></div>
       <div class="paper-grid" id="paperGrid"></div>
     </section>
+    </div>
 
     <footer class="lab-footer">Toy corpus, BM25 retrieval, 25 questions: an illustration of the ideas, not a benchmark. Everything runs locally. Source: <code>src/utils/chunkLab.js</code>.</footer>
   </main>
 
   <script type="module" src="./chunking.js"></script>
+  <script type="module" src="./advisor.js"></script>
 </body>
 </html>
